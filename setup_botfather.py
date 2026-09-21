@@ -19,17 +19,23 @@ from config import TELEGRAM_BOT_TOKEN
 API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 COMMANDS = [
-    {"command": "start", "description": "Welcome and examples"},
+    {"command": "add", "description": "Photograph a book page to make MCQs"},
+    {"command": "quiz", "description": "Start a practice quiz"},
+    {"command": "stats", "description": "Your accuracy by subject"},
+    {"command": "weak", "description": "Your weakest topics"},
+    {"command": "bank", "description": "How many questions you have"},
+    {"command": "daily", "description": "Schedule a daily quiz"},
+    {"command": "nodaily", "description": "Cancel the daily quiz"},
+    {"command": "done", "description": "Stop add mode"},
     {"command": "help", "description": "How to use the bot"},
-    {"command": "reset", "description": "Clear conversation memory"},
+    {"command": "start", "description": "Welcome"},
 ]
 
 DESCRIPTION = (
-    "Send a math or science question as text, or a photo of a problem. "
-    "Get a structured answer: Input, Result, Details, Notes."
+    "TSLPRB PC/SI prep. Photograph a page from your book and I turn it into exam MCQs, then drill you with spaced repetition. Also solves any question you send."
 )
 
-SHORT_DESCRIPTION = "Wolfram-style solver. Text or photo in, structured answer out."
+SHORT_DESCRIPTION = "TSLPRB PC/SI prep: turn your books into practice MCQs."
 
 
 def call(method: str, payload: dict | None = None) -> dict:

@@ -102,6 +102,38 @@ class NebiusClient:
         ]
         return await self._complete(messages, model=self.vision_model)
 
+    async def complete_raw(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        temperature: float = TEMPERATURE,
+        max_tokens: int = MAX_TOKENS,
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
+        """Run an arbitrary message list. Used by features with their own prompts.
+
+        Unlike ask_text/ask_image this does not prepend the solver system prompt;
+        the caller supplies the whole conversation.
+        """
+        if not messages:
+            raise AIError("Nothing to send to the model.")
+        has_image = any(isinstance(m.get("content"), list) for m in messages)
+        payload: dict[str, Any] = {
+            "model": model or (self.vision_model if has_image else self.model),
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format:
+            payload["response_format"] = response_format
+
+        data = await self._post_with_retries(payload)
+        content = _extract_content(data)
+        if not content:
+            raise AIError(FRIENDLY_EMPTY, detail="Model returned no content")
+        return content
+
     async def aclose(self) -> None:
         """Close the underlying HTTP connection pool."""
         await self._client.aclose()
