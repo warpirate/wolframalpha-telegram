@@ -1,186 +1,266 @@
-# Wolfram-style Telegram Bot
+<div align="center">
 
-A Telegram bot that answers like Wolfram Alpha. Send it **text** (equations, unit
-conversions, science/math questions) or a **photo** (handwritten equations,
-textbook problems, diagrams, charts, screenshots) and it replies with a compact,
-structured answer:
+# 📚 TSLPRB Prep Bot
+
+**Photograph a page from your textbook. Get exam questions back. Drill them until they stick.**
+
+A Telegram bot for Telangana Police Constable & Sub-Inspector preparation — and a
+general-purpose question solver — built on an OpenAI-compatible vision model.
+
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![python-telegram-bot](https://img.shields.io/badge/python--telegram--bot-21%2B-26A5E4?logo=telegram&logoColor=white)](https://github.com/python-telegram-bot/python-telegram-bot)
+[![Async](https://img.shields.io/badge/async-asyncio-4B8BBE)](https://docs.python.org/3/library/asyncio.html)
+[![License](https://img.shields.io/badge/license-MIT-green)](#license)
+
+</div>
+
+---
+
+## The problem this solves
+
+Ask any LLM a General Studies question and it will answer confidently. It will also
+be **wrong** a meaningful fraction of the time — and wrong in the same clean, formatted,
+authoritative voice it uses when it is right. For exam preparation that is worse than
+useless: you memorise the wrong amendment number and only find out in the hall.
+
+This bot never asks the model what it knows. It asks the model **what is printed on
+the page you just photographed**.
 
 ```
-📥 Input      one-line interpretation of the question
-✅ Result     the direct answer
-📊 Details    up to 6 bullets of reasoning / formulas
-💡 Notes      assumptions and edge cases (omitted when not useful)
+You:  /add polity
+You:  📷 [photo of a page from Laxmikanth]
+
+Bot:  ✅ Added 6 questions.
+      Subject: Polity
+      Topics: Fundamental Rights, Right to Property, Constitutional Remedies
 ```
 
-Answers use Unicode math (√ ∫ π ∞ ≈ ≤ ≥ ∑ ∆ θ × ÷ ± x² a₁) — never LaTeX. Any
-LaTeX the model still emits is converted to Unicode before sending.
+Every question, every option, and every explanation must be answerable from your page
+alone. If the page is blurry, upside down, or is just a chapter index, the bot returns
+nothing and tells you why rather than inventing filler.
 
-## Features
+---
 
-- Text and vision in one model (images are inlined as base64 data URLs)
-- Structured, bold-headed answers rendered with Telegram MarkdownV2
-- LaTeX → Unicode conversion (`\frac{a}{b}` → `(a)/(b)`, `\sqrt{x}` → `√(x)`, …)
-- Safe MarkdownV2 escaping with automatic plain-text fallback if Telegram rejects a message
-- Automatic chunking under Telegram's 4096-character limit
-- Images are downscaled/re-encoded client-side so large photos never blow up the request
-- Retries with exponential backoff (1s, 2s, 4s) on 429 and 5xx responses
-- Short per-chat conversation memory (`/reset` to clear)
+## Two modes, one bot
 
-## Requirements
+### 1. 🎯 Drill — your books become a question bank
 
-- Python 3.10+
-- A Telegram bot token
-- A Nebius Token Factory (AI Studio) API key
+| Step | What happens |
+|------|--------------|
+| `/add polity` | Arms add-mode for 15 minutes |
+| 📷 Send a page | Vision model reads it, writes up to 8 MCQs grounded in that page |
+| `/quiz` | Serves questions with A/B/C/D inline buttons |
+| Tap an answer | Instant ✅/❌, correct option highlighted, explanation shown |
+| `/stats` | Accuracy per subject with progress bars |
+| `/weak` | Your worst topics, lowest accuracy first |
+| `/daily 6` | 10 questions pushed to you at 6 AM IST, every day |
 
-## Setup
+Answers feed a **spaced-repetition scheduler**. Get one wrong and it returns in an hour.
+Get it right repeatedly and it drifts out to 12h → 24h → 3d → 1w → 2w → 30d.
+
+### 2. 🔬 Solve — send any question, get a structured answer
+
+Send text or a photo of a problem and get back:
+
+```
+📥 Input     one-line interpretation of what was asked
+✅ Result    the direct answer, nothing else
+📊 Details   up to 6 bullets of working
+💡 Notes     assumptions and edge cases (omitted when there are none)
+```
+
+Answers use real Unicode math — `√ ∫ π ∞ ≈ ≤ ≥ ∑ ∆ θ × ÷ ± x² a₁` — never LaTeX.
+Any LaTeX the model still emits gets converted before it reaches Telegram:
+
+| Model writes | You see |
+|---|---|
+| `\frac{-b \pm \sqrt{\Delta}}{2a}` | `(-b ± √(∆))/(2a)` |
+| `x^{2} + H_{2}O` | `x² + H₂O` |
+| `$$\int_0^\infty$$` | `∫₀^(∞)` |
+
+---
+
+## Quickstart
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/<you>/wolframalpha-telegram
 cd wolframalpha-telegram
 
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # macOS / Linux
 
 pip install -r requirements.txt
 
-cp .env.example .env        # Windows: copy .env.example .env
-# edit .env and fill in your keys
+cp .env.example .env            # Windows: copy .env.example .env
+# fill in TELEGRAM_BOT_TOKEN and NEBIUS_API_KEY
 
+python setup_botfather.py       # pushes the command menu (run once)
 python main.py
 ```
 
-The bot runs in long-polling mode; no public URL or webhook is needed. Stop it
-with `Ctrl+C`.
+Long-polling — no webhook, no public URL, no port to open.
 
-## Getting the keys
+<details>
+<summary><b>Getting the two keys</b></summary>
 
-**Telegram bot token**
+**Telegram bot token** — open [@BotFather](https://t.me/BotFather), send `/newbot`,
+choose a display name and a username ending in `bot`. He replies with
+`123456789:AAH...`. That token is full control of the bot: keep it in `.env`
+(already gitignored) and `/revoke` it if it ever leaks.
 
-1. Open [@BotFather](https://t.me/BotFather) in Telegram.
-2. Send `/newbot` and follow the prompts (name, then a username ending in `bot`).
-3. BotFather replies with a token like `123456789:AAH...`. Put it in
-   `TELEGRAM_BOT_TOKEN`.
-4. Optional: `/setdescription`, `/setabouttext`, and `/setcommands` with:
-   ```
-   start - Welcome message
-   help - How to use the bot
-   reset - Clear conversation memory
-   ```
+**Nebius API key** — sign up at [Nebius AI Studio](https://studio.nebius.ai/),
+open **API keys**, create one.
 
-**Nebius API key**
+</details>
 
-1. Sign up at [Nebius AI Studio / Token Factory](https://studio.nebius.ai/).
-2. Go to **API keys** and create a new key.
-3. Put it in `NEBIUS_API_KEY`.
+---
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/add [subject]` | Next photos become questions |
+| `/done` | Leave add-mode |
+| `/quiz [subject] [n]` | `/quiz polity 15` — defaults to 10, any subject |
+| `/stats` | Accuracy overall, today, and per subject |
+| `/weak` | Weakest topics, lowest accuracy first |
+| `/bank` | How many questions you have stored |
+| `/daily 6` / `/daily 21 20` | Daily quiz at an hour (IST), optional count |
+| `/nodaily` | Cancel it |
+| `/reset` | Clear the solver's short conversation memory |
+
+Sending a photo **without** `/add` solves it instead of banking it.
+
+---
+
+## How it works
+
+```
+                  ┌──────────────┐
+   Telegram ─────▶│   main.py    │  handlers, add-mode routing, JobQueue
+                  └──────┬───────┘
+                         │
+        ┌────────────────┼──────────────────┐
+        ▼                ▼                  ▼
+  ┌───────────┐   ┌─────────────┐    ┌─────────────┐
+  │  mcq.py   │   │ ai_client.py│    │   quiz.py   │
+  │ page ──▶  │──▶│  Nebius     │    │ keyboards,  │
+  │ MCQs      │   │  (OpenAI-   │    │ scoring,    │
+  └─────┬─────┘   │  compatible)│    │ rendering   │
+        │         └─────────────┘    └──────┬──────┘
+        ▼                                   │
+  ┌───────────┐                             │
+  │   db.py   │◀────────────────────────────┘
+  │  SQLite   │  questions · attempts · review schedule · prefs
+  └───────────┘
+
+  formatter.py  ── LaTeX→Unicode, MarkdownV2 escaping, 4096-char chunking
+```
+
+### Design notes worth knowing
+
+These are the non-obvious things that cost real debugging time:
+
+<details>
+<summary><b>Reasoning tokens silently eat your answer</b></summary>
+
+`DeepSeek-V4.1-Flash` is a reasoning model, and its hidden reasoning tokens are billed
+against `max_tokens`. With a 1500-token budget, an open-ended question ("give me a hard
+percentage problem") burns the **entire** allowance thinking and returns
+`content: ""` with `finish_reason: "length"` — a successful HTTP 200 with no answer in it.
+
+The fix is three-part: a 4000-token default budget, and if it *still* starves, one
+automatic retry with a doubled budget and `reasoning_effort: "none"`. The client also
+deliberately refuses to fall back to `message.reasoning_content` — that field holds raw
+chain of thought (*"We need answer user asks..."*) and must never reach a user.
+
+</details>
+
+<details>
+<summary><b>MarkdownV2 is unforgiving</b></summary>
+
+One unescaped `.` and Telegram rejects the whole message. So everything gets escaped —
+then a small allowlist un-escapes exactly the four section headers we *want* bold, via
+a regex anchored to the emoji. Chunking never splits between a backslash and the
+character it escapes, and every send has a plain-text fallback if Telegram still objects.
+
+Verified against topic names containing `*`, `_`, backticks and brackets.
+
+</details>
+
+<details>
+<summary><b>Models don't return the JSON shape you asked for</b></summary>
+
+Asked for `{"questions": [...]}`, this model returns `{"type": "json_object", "content": [...]}`.
+The parser walks the response recursively looking for the first list of question-shaped
+dicts, strips code fences, and falls back to a regex bracket-match. Then it validates:
+exactly 4 options, no duplicate or blank options, `correct_index` in range, no duplicate
+question text.
+
+</details>
+
+<details>
+<summary><b>Images are normalised before they cost you tokens</b></summary>
+
+Photos are downscaled to a 1600 px long edge and re-encoded as JPEG, stepping quality
+down until under 3 MB, all in a worker thread so the event loop never blocks. A
+6000×4000 PNG becomes a ~10 KB JPEG the model reads just as well.
+
+</details>
+
+---
 
 ## Configuration
 
 | Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | yes | — | Bot token from BotFather |
-| `NEBIUS_API_KEY` | yes | — | Nebius API key |
-| `NEBIUS_BASE_URL` | no | `https://api.studio.nebius.ai/v1` | OpenAI-compatible endpoint |
-| `NEBIUS_MODEL` | no | `deepseek-ai/DeepSeek-V4.1-Flash` | Model id used for text |
-| `NEBIUS_VISION_MODEL` | no | same as `NEBIUS_MODEL` | Model id used for photos |
-| `LOG_LEVEL` | no | `INFO` | `DEBUG` for verbose logs |
-| `HISTORY_TURNS` | no | `4` | Past Q/A pairs kept per chat (`0` disables) |
+|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | ✅ | — | From BotFather |
+| `NEBIUS_API_KEY` | ✅ | — | From Nebius AI Studio |
+| `NEBIUS_BASE_URL` | | `https://api.studio.nebius.ai/v1` | Any OpenAI-compatible endpoint |
+| `NEBIUS_MODEL` | | `deepseek-ai/DeepSeek-V4.1-Flash` | Text model |
+| `NEBIUS_VISION_MODEL` | | same as above | Photo model |
+| `LOG_LEVEL` | | `INFO` | `DEBUG` for verbose |
+| `HISTORY_TURNS` | | `4` | Solver memory depth, `0` disables |
 
-The bot starts only if both required variables are set; otherwise it exits with
-a clear `RuntimeError`.
+Placeholder values from `.env.example` are rejected at startup, so the bot fails loudly
+instead of booting and then 401-ing on every question.
 
-## Swapping the model
-
-The client is a plain OpenAI-compatible wrapper, so any Nebius catalog model
-works — just change `NEBIUS_MODEL` and restart:
-
-```env
-NEBIUS_MODEL=deepseek-ai/DeepSeek-V4.1-Flash
-```
-
-Photo support needs a **vision-capable** model. The default,
-`deepseek-ai/DeepSeek-V4.1-Flash`, handles both text and images, so no extra
-configuration is needed.
-
-If you switch `NEBIUS_MODEL` to a text-only model, keep photos working by
-pointing the vision path at a multimodal model:
-
-```env
-NEBIUS_MODEL=deepseek-ai/DeepSeek-V4-Pro
-NEBIUS_VISION_MODEL=google/gemma-3-27b-it
-```
-
-Leave `NEBIUS_VISION_MODEL` unset to send both text and images to the same
-model. List the ids your account can actually use with:
+**Swapping models.** The default handles both text and vision. If you point
+`NEBIUS_MODEL` at a text-only model, set `NEBIUS_VISION_MODEL` separately to keep photos
+working. List what your account can actually use:
 
 ```bash
 curl -H "Authorization: Bearer $NEBIUS_API_KEY" https://api.studio.nebius.ai/v1/models
 ```
 
-Because the endpoint is OpenAI-compatible, `NEBIUS_BASE_URL` can also point at
-any other OpenAI-style provider.
+---
 
-## Project layout
+## Running it always-on
 
-| File | Role |
-| --- | --- |
-| `main.py` | Telegram handlers, image preprocessing, lifecycle |
-| `ai_client.py` | Async Nebius client (text + vision), retries, `AIError` |
-| `formatter.py` | LaTeX → Unicode, MarkdownV2 escaping, message chunking |
-| `prompts.py` | System prompt that enforces the answer structure |
-| `config.py` | Environment loading and validation |
+### Windows — no admin needed
 
-## Notes and limits
-
-- Telegram caps downloads at 20 MB; larger photos are rejected by Telegram itself.
-- Photos are resized to a 1600 px long edge and re-encoded as JPEG (quality
-  stepped down until under 3 MB) before being base64-encoded.
-- API keys and full user messages are never written to the logs; only lengths,
-  chat ids, and short error excerpts are.
-- On a Nebius outage the bot retries three times and then replies with a
-  friendly message instead of crashing.
-
-## Always-on (Windows)
-
-Four helper scripts keep the bot running like a service, no admin rights needed:
-
-| Script | What it does |
-| --- | --- |
-| `install_autostart.bat` | Starts the bot now and on every Windows login |
+| Script | Does |
+|---|---|
+| `install_autostart.bat` | Starts now, and on every login |
 | `uninstall_autostart.bat` | Removes the login entry |
-| `run_bot.bat` | Runs the bot in a restart loop, logging to `bot.log` |
-| `stop_bot.bat` | Stops the loop and the bot |
+| `run_bot.bat` | Restart loop, logs to `bot.log` |
+| `stop_bot.bat` | Stops everything |
 
-`install_autostart.bat` writes a small launcher to your Startup folder
-(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\wolfram-telegram-bot.vbs`)
-that runs `run_bot.bat` with no visible console window.
+The loop re-reads `.env` on each restart, so editing a key takes effect within ~10
+seconds. Watch with `type bot.log`.
 
-The restart loop re-reads `.env` every time it restarts, so editing a key takes
-effect within ~10 seconds without touching anything else. Watch it with:
-
-```
-type bot.log
-```
-
-`setup_botfather.py` pushes the command menu, description and about text over
-the Bot API - run it once, or again after editing those values.
-
-## Deployment
-
-Any always-on host works (VPS, Fly.io, Railway, a container). Set the same
-environment variables there and run `python main.py`. A minimal systemd unit:
+### Linux — systemd
 
 ```ini
 [Unit]
-Description=Wolfram-style Telegram bot
+Description=TSLPRB Prep Bot
 After=network-online.target
 
 [Service]
-WorkingDirectory=/opt/wolframalpha-telegram
-EnvironmentFile=/opt/wolframalpha-telegram/.env
-ExecStart=/opt/wolframalpha-telegram/.venv/bin/python main.py
+WorkingDirectory=/opt/prep-bot
+EnvironmentFile=/opt/prep-bot/.env
+ExecStart=/opt/prep-bot/.venv/bin/python main.py
 Restart=always
 RestartSec=5
 
@@ -188,5 +268,67 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Run only one instance per bot token — Telegram allows a single long-polling
-consumer at a time.
+> Run **one** instance per bot token. Telegram allows a single long-polling consumer.
+
+---
+
+## Project layout
+
+| File | Role |
+|---|---|
+| `main.py` | Handlers, add-mode routing, image preprocessing, JobQueue, lifecycle |
+| `ai_client.py` | Async Nebius client, retry/backoff, reasoning-starvation recovery |
+| `mcq.py` | Page → MCQs, defensive JSON parsing, validation |
+| `db.py` | SQLite: question bank, attempts, review scheduling, preferences |
+| `quiz.py` | Session flow, inline keyboards, scoring, MarkdownV2 rendering |
+| `formatter.py` | LaTeX→Unicode, MarkdownV2 escaping, chunking |
+| `exam_prompts.py` | Grounding prompt and subject taxonomy |
+| `prompts.py` | Solver system prompt |
+| `config.py` | Env loading, validation, placeholder detection |
+| `setup_botfather.py` | Pushes command menu and descriptions over the Bot API |
+
+Your question bank lives in `exam.db` (gitignored — it is personal data).
+
+---
+
+## Honest limitations
+
+- **Question quality tracks page quality.** A crisp, flat, well-lit page produces good
+  questions. A dim angled photo of a two-page spread produces mush.
+- **Current affairs are out of scope.** No live news source, and the model has a
+  knowledge cutoff. Photographing a monthly current-affairs magazine works; asking the
+  bot "what happened this week" does not.
+- **The bot only knows what you feed it.** It has no syllabus coverage map and will not
+  tell you what you haven't studied.
+- **Open-ended questions take ~20 s** because reasoning runs before any output. Straight
+  computation is ~6 s.
+- **Single-user by design.** Data is keyed by Telegram user id and it works fine for a
+  few people, but there is no auth, quota, or admin layer.
+
+---
+
+## Roadmap
+
+- [ ] Previous-year question import
+- [ ] Timed full-length mock tests with a real 200-question paper structure
+- [ ] Syllabus coverage map — what you've drilled vs what the exam covers
+- [ ] Wolfram MCP integration for exact computation ([server](https://www.wolfram.com/artificial-intelligence/mcp/cloud/) is free and needs no auth)
+- [ ] Telugu support for the SI language paper
+- [ ] Export the bank to Anki
+
+---
+
+## Contributing
+
+Issues and PRs welcome. The codebase is plain asyncio with no framework magic —
+`main.py` is the only place handlers are registered, and every module is importable and
+testable on its own.
+
+## License
+
+MIT. The exam content you generate belongs to you and to the publishers of the books you
+photograph; this tool makes no claim to it.
+
+<div align="center">
+<sub>Built for one person's exam. Useful for anyone with a textbook and a phone.</sub>
+</div>
