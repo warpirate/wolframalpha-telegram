@@ -83,7 +83,7 @@ Any LaTeX the model still emits gets converted before it reaches Telegram:
 ## Quickstart
 
 ```bash
-git clone https://github.com/<you>/wolframalpha-telegram
+git clone https://github.com/warpirate/wolframalpha-telegram
 cd wolframalpha-telegram
 
 python -m venv .venv
