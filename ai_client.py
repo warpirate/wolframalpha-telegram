@@ -17,12 +17,16 @@ from prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT_SECONDS = 60.0
+REQUEST_TIMEOUT_SECONDS = 120.0  # reasoning models need room; empty-answer retry doubles this
 MAX_ATTEMPTS = 4  # 1 initial attempt + 3 retries
 BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 TEMPERATURE = 0.3
-MAX_TOKENS = 1500
+# DeepSeek-V4.1-Flash is a reasoning model: hidden reasoning tokens are billed
+# against max_tokens. With a small budget an open-ended question can spend the
+# entire allowance thinking and return an empty answer, so keep real headroom.
+MAX_TOKENS = 4000
+RETRY_MAX_TOKENS = 6000
 MAX_HISTORY_MESSAGES = 12
 
 FRIENDLY_TIMEOUT = "The model took too long to answer. Please try again in a moment."
@@ -127,12 +131,7 @@ class NebiusClient:
         }
         if response_format:
             payload["response_format"] = response_format
-
-        data = await self._post_with_retries(payload)
-        content = _extract_content(data)
-        if not content:
-            raise AIError(FRIENDLY_EMPTY, detail="Model returned no content")
-        return content
+        return await self._send(payload)
 
     async def aclose(self) -> None:
         """Close the underlying HTTP connection pool."""
@@ -147,11 +146,38 @@ class NebiusClient:
             "temperature": TEMPERATURE,
             "max_tokens": MAX_TOKENS,
         }
+        return await self._send(payload)
+
+    async def _send(self, payload: dict[str, Any]) -> str:
+        """POST once, and recover if reasoning consumed the whole token budget."""
         data = await self._post_with_retries(payload)
         content = _extract_content(data)
-        if not content:
-            raise AIError(FRIENDLY_EMPTY, detail="Model returned no content")
-        return content
+        if content:
+            return content
+
+        if _was_truncated(data):
+            # The model thought until it ran out of room without writing an
+            # answer. Retry with a bigger budget and reasoning switched off.
+            logger.warning(
+                "Empty answer (finish_reason=length, reasoning_tokens=%s); retrying without reasoning",
+                _reasoning_tokens(data),
+            )
+            retry = dict(payload)
+            retry["max_tokens"] = max(
+                int(payload.get("max_tokens") or MAX_TOKENS) * 2, RETRY_MAX_TOKENS
+            )
+            retry["reasoning_effort"] = "none"
+            try:
+                data = await self._post_with_retries(retry)
+            except AIError:
+                # Some models reject reasoning_effort outright - retry on budget alone.
+                retry.pop("reasoning_effort", None)
+                data = await self._post_with_retries(retry)
+            content = _extract_content(data)
+            if content:
+                return content
+
+        raise AIError(FRIENDLY_EMPTY, detail="Model returned no content")
 
     async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_error: AIError | None = None
@@ -195,6 +221,19 @@ class NebiusClient:
 
 
 # ---------------------------------------------------------------------- helpers
+
+
+def _was_truncated(data: dict[str, Any]) -> bool:
+    """True when the model stopped because it hit max_tokens."""
+    try:
+        return data["choices"][0].get("finish_reason") == "length"
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def _reasoning_tokens(data: dict[str, Any]) -> Any:
+    usage = data.get("usage") if isinstance(data, dict) else None
+    return usage.get("reasoning_tokens") if isinstance(usage, dict) else None
 
 
 def _friendly_for_status(status: int) -> str:
@@ -269,11 +308,8 @@ def _extract_content(data: dict[str, Any]) -> str:
                 parts.append(part["text"])
         return "\n".join(parts).strip()
 
-    # Reasoning-style models may only fill reasoning_content.
-    reasoning = message.get("reasoning_content")
-    if isinstance(reasoning, str):
-        return reasoning.strip()
-
+    # Deliberately NOT falling back to message["reasoning_content"]: that is raw
+    # chain of thought ("We need answer user asks...") and must never be shown.
     return ""
 
 
