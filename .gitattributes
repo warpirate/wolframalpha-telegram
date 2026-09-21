@@ -1,0 +1,12 @@
+# Normalise line endings: LF in the repository, native in the working tree.
+# Without this, committing from Windows produces CRLF warnings on every add.
+* text=auto eol=lf
+
+# Windows helper scripts must keep CRLF or cmd.exe mis-parses them.
+*.bat text eol=crlf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.gif binary
+*.db binary
