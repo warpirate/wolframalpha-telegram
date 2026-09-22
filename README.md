@@ -78,7 +78,7 @@ Any LaTeX the model still emits gets converted before it reaches Telegram:
 
 | Model writes | You see |
 |---|---|
-| `rac{-b \pm \sqrt{\Delta}}{2a}` | `(-b ± √(∆))/(2a)` |
+| `\frac{-b \pm \sqrt{\Delta}}{2a}` | `(-b ± √(∆))/(2a)` |
 | `x^{2} + H_{2}O` | `x² + H₂O` |
 | `$$\int_0^\infty$$` | `∫₀^(∞)` |
 
