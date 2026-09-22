@@ -250,23 +250,21 @@ curl -H "Authorization: Bearer $NEBIUS_API_KEY" https://api.studio.nebius.ai/v1/
 The loop re-reads `.env` on each restart, so editing a key takes effect within ~10
 seconds. Watch with `type bot.log`.
 
-### Linux — systemd
+### Linux / cloud — one command
 
-```ini
-[Unit]
-Description=TSLPRB Prep Bot
-After=network-online.target
+[`deploy/DEPLOY.md`](deploy/DEPLOY.md) walks through hosting it free and forever on
+Oracle Cloud's Always Free tier. On any Ubuntu box:
 
-[Service]
-WorkingDirectory=/opt/prep-bot
-EnvironmentFile=/opt/prep-bot/.env
-ExecStart=/opt/prep-bot/.venv/bin/python main.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+```bash
+curl -fsSL https://raw.githubusercontent.com/warpirate/wolframalpha-telegram/main/deploy/setup.sh | bash
 ```
+
+That installs Python, adds swap, builds a virtualenv, and registers a hardened
+systemd unit that restarts on failure and survives reboots. `deploy/update.sh` pulls
+new code and restarts.
+
+Vercel, Netlify and similar will **not** work: the bot is a long-running process with
+a local SQLite file, and serverless platforms give you neither.
 
 > Run **one** instance per bot token. Telegram allows a single long-polling consumer.
 
