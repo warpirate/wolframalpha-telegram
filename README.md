@@ -56,17 +56,24 @@ completeness. The reply shape adapts to the question:
 10% = 64, 5% = 32, so 15% = 64 + 32 = 96.
 ```
 
-**Method matters** — the answer, the fastest exam technique, and the trap:
+**Method matters** — the answer, then the working *the way a person actually does
+it*, then the trap:
 
 ```
-60 km/h
+3900
 
-⚡ Pole = zero length, so distance = train length only (2 sec)
-   150/9 m/s → × 18/5 → 60 km/h (5 sec)
+⚡ 15% down then 20% up → 85 × 12 = 1020, so 1.02 — a net 2% gain
+   So 2% of the original = 78 → 1% = 39 → 100% = 3900
+   Check: 3900 → 3315 → 3978, which is 78 more (about 25 sec)
 
-🎯 Don't add the train's own length twice — a pole has no length.
-   Only platforms and bridges get added.
+🎯 Net change is not −15 + 20 = +5%. Multiply the factors.
 ```
+
+Note what it does *not* say: `78 ÷ 0.02 = 3900`. Nobody divides by 0.02. The prompt
+enforces mental-arithmetic habits across every subject — get to the unit then scale,
+build percentages from 10% and 5%, clear decimals before multiplying, treat ratios as
+parts, round then correct. Rates, not formulas: *"A does 1/12 a day, B does 2/12,
+together 3/12 — flip it, 4 days."*
 
 **Explain or compare** — a one-sentence answer, then at most four bullets.
 
