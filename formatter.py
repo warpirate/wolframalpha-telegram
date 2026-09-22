@@ -26,10 +26,20 @@ _ESCAPE_RE = re.compile(r"([%s])" % re.escape(_MARKDOWN_V2_SPECIALS))
 _UNESCAPE_RE = re.compile(r"\\([%s])" % re.escape(_MARKDOWN_V2_SPECIALS))
 
 # Section headers we intentionally keep as bold markdown.
-_SECTION_NAMES = ("Input", "Result", "Details", "Notes")
+_SECTION_NAMES = ("Input", "Result", "Details", "Notes", "Answer", "Why")
 _HEADER_RE = re.compile(
-    r"(?m)^([ \t]*)((?:📥|✅|📊|💡)?[ \t]*)\\\*(%s)\\\*" % "|".join(_SECTION_NAMES)
+    r"(?m)^([ \t]*)((?:📥|✅|📊|💡|⚡|🎯)?[ \t]*)\\\*(%s)\\\*" % "|".join(_SECTION_NAMES)
 )
+
+# Models write emphasis as **bold** (and sometimes *bold*), but MarkdownV2 wants a
+# single asterisk. Escaping blindly turns those into visible "**text**" junk, so
+# the spans are lifted out before escaping and reinserted as real bold after.
+_BOLD_SENTINEL = "\x00b%d\x00"
+_BOLD_SPAN_RE = re.compile(
+    r"\*\*(?P<a>[^*\n]{1,200})\*\*"          # **bold**
+    r"|(?<![*\w])\*(?P<b>[^*\n]{1,200})\*(?![*\w])"  # *bold*, not 2*3 or a*b
+)
+_SENTINEL_RE = re.compile(r"\x00b(\d+)\x00")
 
 # --------------------------------------------------------------------- LaTeX
 
@@ -220,6 +230,25 @@ def _restore_section_headers(escaped: str) -> str:
     return _HEADER_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}*{m.group(3)}*", escaped)
 
 
+def _lift_bold(text: str) -> tuple[str, list[str]]:
+    """Replace emphasis spans with sentinels, returning the text and their contents."""
+    spans: list[str] = []
+
+    def take(match: re.Match[str]) -> str:
+        content = match.group("a") if match.group("a") is not None else match.group("b")
+        spans.append(content)
+        return _BOLD_SENTINEL % (len(spans) - 1)
+
+    return _BOLD_SPAN_RE.sub(take, text), spans
+
+
+def _drop_bold(escaped: str, spans: list[str]) -> str:
+    """Put the spans back as real MarkdownV2 bold, escaping their contents."""
+    return _SENTINEL_RE.sub(
+        lambda m: f"*{escape_markdown_v2(spans[int(m.group(1))])}*", escaped
+    )
+
+
 # ------------------------------------------------------------------- chunking
 
 
@@ -300,8 +329,10 @@ def prepare_for_telegram(raw: str, max_len: int = DEFAULT_CHUNK_LEN) -> list[str
     if not raw or not raw.strip():
         return []
     converted = latex_to_unicode(raw)
-    escaped = escape_markdown_v2(converted)
+    lifted, spans = _lift_bold(converted)
+    escaped = escape_markdown_v2(lifted)
     escaped = _restore_section_headers(escaped)
+    escaped = _drop_bold(escaped, spans)
     return split_message(escaped, max_len=max_len)
 
 

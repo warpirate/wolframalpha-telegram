@@ -1,19 +1,5 @@
 <div align="center">
 
-# 📚 TSLPRB Prep Bot
-
-**Photograph a page from your textbook. Get exam questions back. Drill them until they stick.**
-
-A Telegram bot for Telangana Police Constable & Sub-Inspector preparation — and a
-general-purpose question solver — built on an OpenAI-compatible vision model.
-
-[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![python-telegram-bot](https://img.shields.io/badge/python--telegram--bot-21%2B-26A5E4?logo=telegram&logoColor=white)](https://github.com/python-telegram-bot/python-telegram-bot)
-[![Async](https://img.shields.io/badge/async-asyncio-4B8BBE)](https://docs.python.org/3/library/asyncio.html)
-[![License](https://img.shields.io/badge/license-MIT-green)](#license)
-
-</div>
-
 ---
 
 ## The problem this solves
@@ -45,36 +31,54 @@ nothing and tells you why rather than inventing filler.
 
 ### 1. 🎯 Drill — your books become a question bank
 
-| Step | What happens |
-|------|--------------|
-| `/add polity` | Arms add-mode for 15 minutes |
-| 📷 Send a page | Vision model reads it, writes up to 8 MCQs grounded in that page |
-| `/quiz` | Serves questions with A/B/C/D inline buttons |
-| Tap an answer | Instant ✅/❌, correct option highlighted, explanation shown |
-| `/stats` | Accuracy per subject with progress bars |
-| `/weak` | Your worst topics, lowest accuracy first |
-| `/daily 6` | 10 questions pushed to you at 6 AM IST, every day |
+| Step            | What happens                                                     |
+| --------------- | ---------------------------------------------------------------- |
+| `/add polity` | Arms add-mode for 15 minutes                                     |
+| 📷 Send a page  | Vision model reads it, writes up to 8 MCQs grounded in that page |
+| `/quiz`       | Serves questions with A/B/C/D inline buttons                     |
+| Tap an answer   | Instant ✅/❌, correct option highlighted, explanation shown     |
+| `/stats`      | Accuracy per subject with progress bars                          |
+| `/weak`       | Your worst topics, lowest accuracy first                         |
+| `/daily 6`    | 10 questions pushed to you at 6 AM IST, every day                |
 
 Answers feed a **spaced-repetition scheduler**. Get one wrong and it returns in an hour.
 Get it right repeatedly and it drifts out to 12h → 24h → 3d → 1w → 2w → 30d.
 
-### 2. 🔬 Solve — send any question, get a structured answer
+### 2. 🔬 Solve — send any question, get an answer sized to it
 
-Send text or a photo of a problem and get back:
+The paper is 200 MCQs in about three hours, so answers are built for speed, not
+completeness. The reply shape adapts to the question:
+
+**Recall or one step** — the answer, then one line:
 
 ```
-📥 Input     one-line interpretation of what was asked
-✅ Result    the direct answer, nothing else
-📊 Details   up to 6 bullets of working
-💡 Notes     assumptions and edge cases (omitted when there are none)
+96
+10% = 64, 5% = 32, so 15% = 64 + 32 = 96.
 ```
+
+**Method matters** — the answer, the fastest exam technique, and the trap:
+
+```
+60 km/h
+
+⚡ Pole = zero length, so distance = train length only (2 sec)
+   150/9 m/s → × 18/5 → 60 km/h (5 sec)
+
+🎯 Don't add the train's own length twice — a pole has no length.
+   Only platforms and bridges get added.
+```
+
+**Explain or compare** — a one-sentence answer, then at most four bullets.
+
+**Anything not about the exam** — plain sentences, like a normal chat. No headers,
+no markers. Exam scaffolding is reserved for exam questions.
 
 Answers use real Unicode math — `√ ∫ π ∞ ≈ ≤ ≥ ∑ ∆ θ × ÷ ± x² a₁` — never LaTeX.
 Any LaTeX the model still emits gets converted before it reaches Telegram:
 
 | Model writes | You see |
 |---|---|
-| `\frac{-b \pm \sqrt{\Delta}}{2a}` | `(-b ± √(∆))/(2a)` |
+| `rac{-b \pm \sqrt{\Delta}}{2a}` | `(-b ± √(∆))/(2a)` |
 | `x^{2} + H_{2}O` | `x² + H₂O` |
 | `$$\int_0^\infty$$` | `∫₀^(∞)` |
 
@@ -118,17 +122,17 @@ open **API keys**, create one.
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `/add [subject]` | Next photos become questions |
-| `/done` | Leave add-mode |
-| `/quiz [subject] [n]` | `/quiz polity 15` — defaults to 10, any subject |
-| `/stats` | Accuracy overall, today, and per subject |
-| `/weak` | Weakest topics, lowest accuracy first |
-| `/bank` | How many questions you have stored |
-| `/daily 6` / `/daily 21 20` | Daily quiz at an hour (IST), optional count |
-| `/nodaily` | Cancel it |
-| `/reset` | Clear the solver's short conversation memory |
+| Command                         | What it does                                       |
+| ------------------------------- | -------------------------------------------------- |
+| `/add [subject]`              | Next photos become questions                       |
+| `/done`                       | Leave add-mode                                     |
+| `/quiz [subject] [n]`         | `/quiz polity 15` — defaults to 10, any subject |
+| `/stats`                      | Accuracy overall, today, and per subject           |
+| `/weak`                       | Weakest topics, lowest accuracy first              |
+| `/bank`                       | How many questions you have stored                 |
+| `/daily 6` / `/daily 21 20` | Daily quiz at an hour (IST), optional count        |
+| `/nodaily`                    | Cancel it                                          |
+| `/reset`                      | Clear the solver's short conversation memory       |
 
 Sending a photo **without** `/add` solves it instead of banking it.
 
@@ -213,15 +217,15 @@ down until under 3 MB, all in a worker thread so the event loop never blocks. A
 
 ## Configuration
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | ✅ | — | From BotFather |
-| `NEBIUS_API_KEY` | ✅ | — | From Nebius AI Studio |
-| `NEBIUS_BASE_URL` | | `https://api.studio.nebius.ai/v1` | Any OpenAI-compatible endpoint |
-| `NEBIUS_MODEL` | | `deepseek-ai/DeepSeek-V4.1-Flash` | Text model |
-| `NEBIUS_VISION_MODEL` | | same as above | Photo model |
-| `LOG_LEVEL` | | `INFO` | `DEBUG` for verbose |
-| `HISTORY_TURNS` | | `4` | Solver memory depth, `0` disables |
+| Variable                | Required | Default                             | Purpose                            |
+| ----------------------- | -------- | ----------------------------------- | ---------------------------------- |
+| `TELEGRAM_BOT_TOKEN`  | ✅       | —                                  | From BotFather                     |
+| `NEBIUS_API_KEY`      | ✅       | —                                  | From Nebius AI Studio              |
+| `NEBIUS_BASE_URL`     |          | `https://api.studio.nebius.ai/v1` | Any OpenAI-compatible endpoint     |
+| `NEBIUS_MODEL`        |          | `deepseek-ai/DeepSeek-V4.1-Flash` | Text model                         |
+| `NEBIUS_VISION_MODEL` |          | same as above                       | Photo model                        |
+| `LOG_LEVEL`           |          | `INFO`                            | `DEBUG` for verbose              |
+| `HISTORY_TURNS`       |          | `4`                               | Solver memory depth,`0` disables |
 
 Placeholder values from `.env.example` are rejected at startup, so the bot fails loudly
 instead of booting and then 401-ing on every question.
@@ -240,12 +244,12 @@ curl -H "Authorization: Bearer $NEBIUS_API_KEY" https://api.studio.nebius.ai/v1/
 
 ### Windows — no admin needed
 
-| Script | Does |
-|---|---|
-| `install_autostart.bat` | Starts now, and on every login |
-| `uninstall_autostart.bat` | Removes the login entry |
-| `run_bot.bat` | Restart loop, logs to `bot.log` |
-| `stop_bot.bat` | Stops everything |
+| Script                      | Does                             |
+| --------------------------- | -------------------------------- |
+| `install_autostart.bat`   | Starts now, and on every login   |
+| `uninstall_autostart.bat` | Removes the login entry          |
+| `run_bot.bat`             | Restart loop, logs to`bot.log` |
+| `stop_bot.bat`            | Stops everything                 |
 
 The loop re-reads `.env` on each restart, so editing a key takes effect within ~10
 seconds. Watch with `type bot.log`.
@@ -282,18 +286,18 @@ the four.
 
 ## Project layout
 
-| File | Role |
-|---|---|
-| `main.py` | Handlers, add-mode routing, image preprocessing, JobQueue, lifecycle |
-| `ai_client.py` | Async Nebius client, retry/backoff, reasoning-starvation recovery |
-| `mcq.py` | Page → MCQs, defensive JSON parsing, validation |
-| `db.py` | SQLite: question bank, attempts, review scheduling, preferences |
-| `quiz.py` | Session flow, inline keyboards, scoring, MarkdownV2 rendering |
-| `formatter.py` | LaTeX→Unicode, MarkdownV2 escaping, chunking |
-| `exam_prompts.py` | Grounding prompt and subject taxonomy |
-| `prompts.py` | Solver system prompt |
-| `config.py` | Env loading, validation, placeholder detection |
-| `setup_botfather.py` | Pushes command menu and descriptions over the Bot API |
+| File                   | Role                                                                 |
+| ---------------------- | -------------------------------------------------------------------- |
+| `main.py`            | Handlers, add-mode routing, image preprocessing, JobQueue, lifecycle |
+| `ai_client.py`       | Async Nebius client, retry/backoff, reasoning-starvation recovery    |
+| `mcq.py`             | Page → MCQs, defensive JSON parsing, validation                     |
+| `db.py`              | SQLite: question bank, attempts, review scheduling, preferences      |
+| `quiz.py`            | Session flow, inline keyboards, scoring, MarkdownV2 rendering        |
+| `formatter.py`       | LaTeX→Unicode, MarkdownV2 escaping, chunking                        |
+| `exam_prompts.py`    | Grounding prompt and subject taxonomy                                |
+| `prompts.py`         | Solver system prompt                                                 |
+| `config.py`          | Env loading, validation, placeholder detection                       |
+| `setup_botfather.py` | Pushes command menu and descriptions over the Bot API                |
 
 Your question bank lives in `exam.db` (gitignored — it is personal data).
 
