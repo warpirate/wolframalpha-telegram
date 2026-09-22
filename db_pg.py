@@ -82,7 +82,19 @@ async def connect(dsn: str) -> None:
     global _pool
     if _pool is not None:
         return
-    _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=4, command_timeout=30)
+    # statement_cache_size=0 is required when the DSN points at a connection
+    # pooler (Neon's "-pooler" host, PgBouncer in transaction mode): server-side
+    # prepared statements do not survive being handed a different backend
+    # between queries, and asyncpg would fail with "prepared statement does not
+    # exist". It costs a little planning time and is harmless on a direct DSN.
+    _pool = await asyncpg.create_pool(
+        dsn,
+        min_size=1,
+        max_size=4,
+        command_timeout=30,
+        statement_cache_size=0,
+        max_inactive_connection_lifetime=180,  # free Postgres suspends idle links
+    )
     async with _pool.acquire() as conn:
         await conn.execute(SCHEMA)
     logger.info("Postgres pool ready")
