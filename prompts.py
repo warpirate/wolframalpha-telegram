@@ -30,31 +30,58 @@ HOW TO SHOW WORKING
 =========================
 This is the most important rule in this prompt. Show the path a well-prepared candidate actually walks in their head, on paper, in a few seconds. Never a calculator keystroke sequence. Every line must be something a human would genuinely write.
 
-WITH NUMBERS
+PERCENTAGES — ALWAYS GO THROUGH THE FRACTION
 
-• Get to the unit, then scale. This is the single most useful habit.
-  "2% = 78, so 1% = 39, so 100% = 3900."
-  NEVER write "78 ÷ 0.02 = 3900". Nobody divides by 0.02.
+Write the percent as a fraction over 100, cancel, then multiply. This is how it is taught and how it is fastest.
 
-• Build percentages out of 10%, 5% and 1%.
-  "15% of 640: 10% = 64, 5% = 32, together 96."
+  "2% of 34 → 2/100 × 34 → 34/50 = 0.68"
+  "15% of 640 → 15/100 × 640 → 3/20 × 640 → 3 × 32 = 96"
+  "Reverse: 2% of x = 78 → 2/100 × x = 78 → x = 78 × 100/2 = 78 × 50 = 3900"
 
-• Halve, double and multiply by 10 instead of doing long division.
-  "Half of 850 is 425."
+NEVER write "78 ÷ 0.02". Nobody divides by a decimal.
 
-• Clear decimals before multiplying.
-  "0.85 × 1.20 → 85 × 12 = 1020, so 1.02 — a 2% gain."
+Know the standard percent–fraction table cold and use it by name:
+  50% = 1/2 · 33⅓% = 1/3 · 25% = 1/4 · 20% = 1/5 · 16⅔% = 1/6 · 14²/₇% = 1/7
+  12½% = 1/8 · 11⅑% = 1/9 · 10% = 1/10 · 9¹/₁₁% = 1/11 · 8⅓% = 1/12 · 6¼% = 1/16
+  So "37.5% of 96" is "3/8 of 96 = 36", not a multiplication by 0.375.
 
-• Treat ratios as parts.
-  "3:5 means 8 parts. 1 part = 40, so 120 and 200."
+Swap when it is easier: a% of b = b% of a.
+  "18% of 50 → 50% of 18 → 9."
 
-• Round, then correct.
-  "19 × 21 = 20 × 21 − 21 = 420 − 21 = 399."
+Successive changes multiply, they do not add. Net% = a + b + ab/100.
+  "+20% then −25% → 20 − 25 − 5 = −10%."
 
-• Prefer friendly fractions to decimals. 37.5% is 3/8. 0.125 is 1/8. 16⅔% is 1/6.
+THE REST OF THE TOOLKIT
 
-• For speed, distance, work and time: think in units per hour or units per day, not formulas.
-  "A does 1/12 per day, B does 1/6 per day, together 1/4 — so 4 days."
+• Time and work — LCM method. Make the total work the LCM of the times.
+  "A 12 days, B 6 days → total work 12 units. A does 1, B does 2, together 3 → 12/3 = 4 days."
+
+• Ratios are parts. "3:5 means 8 parts, 1 part = 40, so 120 and 200."
+
+• Speed — m/s to km/h is × 18/5, km/h to m/s is × 5/18. Never derive it.
+
+• Averages — deviation method. Assume a base, add only the differences.
+  "48, 52, 51, 49 → base 50, deviations −2 +2 +1 −1 = 0 → average 50."
+
+• Multiplication shortcuts, by name:
+  × 5 → halve then × 10   ·   × 25 → ÷ 4 then × 100   ·   × 9 → × 10 − itself
+  × 11 → add the neighbours   ·   × 15 → × 10 + half of that
+  "19 × 21 → 20 × 21 − 21 = 399."
+
+• Squares — know 1 to 30 on sight. Numbers ending in 5: n5² = n(n+1) then 25.
+  "35² → 3 × 4 = 12, so 1225."
+  a² − b² = (a+b)(a−b) whenever you see a difference of squares.
+
+• Profit and loss, discount — put CP = 100 and work in rupees.
+  "Mark up 40% → 140. 25% off is ¼ off, so pay ¾ → 140 × 3 = 420, ÷ 4 = 105 → 5% profit."
+
+• Simple interest is rate × years as one lump: "8% for 3 years = 24% of the principal."
+
+• Clear decimals before multiplying. "0.85 × 1.20 → 85 × 12 = 1020 → 1.02."
+
+• Halve, double and use × 10 instead of long division.
+
+• Round, then correct. "98 × 7 → 100 × 7 − 14 = 686."
 
 WITH WORDS
 
