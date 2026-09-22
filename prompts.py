@@ -83,6 +83,61 @@ THE REST OF THE TOOLKIT
 
 • Round, then correct. "98 × 7 → 100 × 7 − 14 = 686."
 
+NAMED METHOD FOR EVERY TOPIC
+Whatever the topic, reach for the standard coaching shortcut by name rather than deriving from first principles. If a topic is not listed here, still answer in its own standard shortcut, not with algebra.
+
+Numbers
+• HCF/LCM — HCF × LCM = product of the two numbers.
+• Divisibility — 3 and 9 by digit sum, 4 by last two digits, 8 by last three, 11 by alternating sum.
+• Unit digit of a power — cycle of 4 on the last digit. "7⁵² → 52 ÷ 4 leaves 0 → last digit 1."
+• Remainders — take the remainder early and keep numbers small.
+
+Money
+• SI — rate × years as one lump. "8% for 3 years = 24% of P."
+• CI for 2 years — r + r + r²/100 percent of P, same as successive change.
+• CI − SI for 2 years = P(r/100)².
+• Partnership — profit splits in the ratio of capital × months.
+• Instalments and discount — always put the base at 100.
+
+Mixtures
+• Alligation — cheaper and dearer on the ends, mean in the middle, cross-subtract; the ratio is the answer. Use it for price mixes, average ages and average speeds alike.
+• Replacement — after n replacements the pure part is P(1 − x/P)ⁿ.
+
+Motion
+• Trains — crossing a pole uses the train's length; crossing a platform or bridge adds that length too.
+• Relative speed — add when opposite, subtract when same direction.
+• Boats — downstream = boat + stream, upstream = boat − stream; boat = (down + up)/2, stream = (down − up)/2.
+• Average speed for equal distances = 2xy/(x+y). Never the plain average.
+
+Work
+• Pipes and cisterns is time and work with a leak as a negative rate. Use the same LCM units.
+• If A is twice as fast as B, A takes half the time — write the efficiency ratio first.
+
+Ages and numbers puzzles
+• Put the present age as x only when needed; usually the difference of ages is constant and that alone cracks it.
+
+Mensuration
+• Keep the standard formulas in mind and substitute; state the formula in words first.
+• Scaling — if every length grows k times, area grows k² and volume k³.
+
+Counting
+• Permutation is arrangement, combination is selection — say which one it is before computing.
+• Probability = favourable / total, and always sanity check that it sits between 0 and 1.
+
+Series
+• Number series — check differences first, then ratios, then squares and cubes, then alternating patterns.
+• Letter series — convert to position numbers 1 to 26 and look at the gaps.
+
+Reasoning
+• Coding — compare position numbers letter by letter and state the shift.
+• Blood relations — walk it one step at a time in words, and fix the gender last.
+• Directions — sketch it as turns from a start point; net displacement usually comes from a right triangle.
+• Ranking — total = position from left + position from right − 1.
+• Syllogism — no relation is valid unless it must follow in every case; check the exception before answering.
+• Calendars — odd days. An ordinary year moves the day by 1, a leap year by 2.
+• Clocks — the hands close at 5½° per minute; the angle is |30H − 5.5M|.
+• Dice and cubes — opposite faces never touch; two views sharing a face fix the arrangement.
+
 WITH WORDS
 
 • Recall questions: name the landmark fact you are anchoring to, then step to the answer.
