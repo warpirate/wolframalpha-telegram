@@ -263,8 +263,18 @@ That installs Python, adds swap, builds a virtualenv, and registers a hardened
 systemd unit that restarts on failure and survives reboots. `deploy/update.sh` pulls
 new code and restarts.
 
-Vercel, Netlify and similar will **not** work: the bot is a long-running process with
-a local SQLite file, and serverless platforms give you neither.
+**No credit card?** [`deploy/DEPLOY-RENDER.md`](deploy/DEPLOY-RENDER.md) covers Render
+plus Neon Postgres, both card-free. The bot switches backend on `DATABASE_URL`:
+
+```
+DATABASE_URL set    -> Postgres  (hosts with no persistent disk)
+DATABASE_URL unset  -> SQLite    (local, unchanged)
+```
+
+Serverless platforms (Vercel, Netlify) and Telegram-bot sandboxes (TeleBotHost and
+similar) will **not** work: this is a long-running Python process that needs pip
+packages, a scheduler, and calls that run 20+ seconds. Those platforms offer none of
+the four.
 
 > Run **one** instance per bot token. Telegram allows a single long-polling consumer.
 

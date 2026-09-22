@@ -12,6 +12,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+from config import DATABASE_URL
+
 IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 
 DB_PATH = "exam.db"
@@ -327,3 +329,45 @@ def close() -> None:
         if _conn is not None:
             _conn.close()
             _conn = None
+
+
+# --------------------------------------------------------------- backend switch
+#
+# With DATABASE_URL set the public functions above are replaced by the Postgres
+# implementations. Everything that imports this module keeps calling the same
+# names with the same arguments and gets the same shapes back.
+
+USING_POSTGRES = bool(DATABASE_URL)
+
+if USING_POSTGRES:
+    import db_pg
+
+    add_questions = db_pg.add_questions          # type: ignore[assignment]
+    pick_quiz = db_pg.pick_quiz                  # type: ignore[assignment]
+    get_question = db_pg.get_question            # type: ignore[assignment]
+    count_questions = db_pg.count_questions      # type: ignore[assignment]
+    record_answer = db_pg.record_answer          # type: ignore[assignment]
+    stats = db_pg.stats                          # type: ignore[assignment]
+    weak_topics = db_pg.weak_topics              # type: ignore[assignment]
+    set_daily = db_pg.set_daily                  # type: ignore[assignment]
+    all_daily = db_pg.all_daily                  # type: ignore[assignment]
+
+
+async def init() -> None:
+    """Open the backend. Awaited once at startup."""
+    if USING_POSTGRES:
+        await db_pg.connect(DATABASE_URL)
+    else:
+        await asyncio.to_thread(_connect)
+
+
+async def shutdown() -> None:
+    """Close the backend. Awaited once at exit."""
+    if USING_POSTGRES:
+        await db_pg.aclose()
+    else:
+        close()
+
+
+def backend_name() -> str:
+    return "postgres" if USING_POSTGRES else f"sqlite ({DB_PATH})"

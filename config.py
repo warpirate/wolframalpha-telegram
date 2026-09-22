@@ -50,6 +50,14 @@ NEBIUS_MODEL: str = _optional("NEBIUS_MODEL", "deepseek-ai/DeepSeek-V4.1-Flash")
 # Set this if NEBIUS_MODEL is a text-only model.
 NEBIUS_VISION_MODEL: str = _optional("NEBIUS_VISION_MODEL", NEBIUS_MODEL)
 
+# Storage backend. Unset means a local SQLite file (laptop); set to a Postgres
+# connection string to use a hosted database (cloud hosts with no persistent disk).
+DATABASE_URL: str = _optional("DATABASE_URL", "")
+
+# Set by hosts like Render that require the process to bind a port. When present,
+# the bot also serves a tiny health endpoint so the platform sees it as alive.
+PORT: int = int(_optional("PORT", "0") or 0)
+
 # Optional tuning knobs (safe defaults, no validation errors if unset).
 LOG_LEVEL: str = _optional("LOG_LEVEL", "INFO").upper()
 HISTORY_TURNS: int = max(0, int(_optional("HISTORY_TURNS", "4")))
@@ -60,6 +68,8 @@ __all__ = [
     "NEBIUS_BASE_URL",
     "NEBIUS_MODEL",
     "NEBIUS_VISION_MODEL",
+    "DATABASE_URL",
+    "PORT",
     "LOG_LEVEL",
     "HISTORY_TURNS",
 ]

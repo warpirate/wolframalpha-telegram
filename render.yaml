@@ -1,0 +1,26 @@
+# Render blueprint. Import the repo at dashboard.render.com and this is picked up.
+#
+# The free instance type has no persistent disk, so the question bank must live in
+# a hosted database: set DATABASE_URL to a Neon or Supabase connection string.
+# Without it the bot falls back to SQLite and loses everything on each restart.
+
+services:
+  - type: web
+    name: prep-bot
+    runtime: python
+    plan: free
+    region: singapore          # closest free region to India
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.9"
+      # Set these in the dashboard - never commit them.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: NEBIUS_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false

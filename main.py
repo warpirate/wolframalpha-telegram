@@ -13,7 +13,9 @@ import contextlib
 import datetime as dt
 import io
 import logging
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, AsyncIterator
 
 from PIL import Image, UnidentifiedImageError
@@ -41,6 +43,7 @@ from config import (
     NEBIUS_BASE_URL,
     NEBIUS_MODEL,
     NEBIUS_VISION_MODEL,
+    PORT,
     TELEGRAM_BOT_TOKEN,
 )
 from exam_prompts import SUBJECTS
@@ -214,6 +217,38 @@ async def _download_photo(message, context: ContextTypes.DEFAULT_TYPE) -> bytes 
         await message.reply_text(IMAGE_DECODE_ERROR)
         return None
     return image_bytes
+
+
+# ----------------------------------------------------------------- health probe
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    """Answers the platform's health checks and keep-alive pings."""
+
+    def do_GET(self) -> None:  # noqa: N802 - name fixed by the base class
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"prep-bot alive")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *args: Any) -> None:
+        """Silence per-request logs; a pinger every few minutes is just noise."""
+
+
+def _start_health_server(port: int) -> None:
+    """Bind a port in a daemon thread.
+
+    Hosts like Render only keep a free web service alive if something is
+    listening, and an external uptime pinger needs a URL to hit. The bot talks
+    to Telegram outbound, so this server serves no other purpose.
+    """
+    server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True, name="health").start()
+    logger.info("Health endpoint listening on port %d", port)
 
 
 # ---------------------------------------------------------------- basic commands
@@ -622,6 +657,9 @@ async def _post_init(application: Application) -> None:
         NEBIUS_MODEL, NEBIUS_VISION_MODEL, NEBIUS_BASE_URL,
     )
 
+    await db.init()
+    logger.info("Storage backend: %s", db.backend_name())
+
     restored = 0
     for row in await db.all_daily():
         _schedule_daily(
@@ -635,7 +673,7 @@ async def _post_shutdown(application: Application) -> None:
     client: Any = application.bot_data.pop(AI_CLIENT_KEY, None)
     if isinstance(client, NebiusClient):
         await client.aclose()
-    db.close()
+    await db.shutdown()
     logger.info("Shutdown complete")
 
 
@@ -668,6 +706,8 @@ def build_application() -> Application:
 
 def main() -> None:
     logger.info("Starting exam-prep bot…")
+    if PORT:
+        _start_health_server(PORT)
     build_application().run_polling(
         allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
     )
