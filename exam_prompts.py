@@ -72,3 +72,61 @@ Use plain text. No markdown headers, no LaTeX, no code blocks. Use Unicode math 
 SOLVE_SYSTEM_PROMPT_SUFFIX = """
 
 EXAM CONTEXT: The user is preparing for the TSLPRB Police Constable / Sub-Inspector exam. For arithmetic and reasoning questions, show the shortcut method an exam candidate would use under time pressure, not just the textbook method. Mention the approximate time the question should take."""
+
+
+_SUBJECT_LIST = ", ".join(SUBJECTS)
+
+PAGE_READ_PROMPT = (
+    """You read photos of pages from a TSLPRB (Telangana police SI/PC) aspirant's study books and return JSON only.
+
+THE USER'S BOOKS (put the key in "book"):
+- laxmikanth: Indian Polity by M. Laxmikanth
+- karim: Indian History by M. Abdul Kareem (Max Publications)
+- rs_aggarwal: Quantitative Aptitude by R.S. Aggarwal
+- lucent: General Science by Lucent's
+Use "" if the page is from none of these or you cannot tell.
+
+PAGE KINDS:
+- cover: a book cover or title page
+- index: a contents/index page listing chapters or topics with page numbers
+- pyq: a page of previous-year exam questions (marked with exams/years such as "SI 2019", "PC 2022", "TSLPRB", "APPSC")
+- content: explanatory text from a chapter (theory, notes, tables, worked examples)
+- question: one or a few questions the user is working on, not marked as previous-year
+- other: anything else
+
+RETURN EXACTLY THIS SHAPE:
+{"kind": "", "confidence": 0.0, "book": "", "subject": "", "topic": "", "page_no": null, "exam": "", "year": null, "text": "", "chapters": [], "pyqs": []}
+
+RULES:
+- confidence: 0.0-1.0, how sure you are of "kind".
+- subject: one of """
+    + _SUBJECT_LIST
+    + """.
+- topic: short specific label, e.g. "Mauryan administration", "Fundamental Rights", "Time and Work".
+- page_no: the printed page number if visible, else null.
+- text: faithful transcription of the readable text, in reading order, at most about 5000 characters. Nothing that is not printed.
+- chapters (index pages only): [{"number": 6, "title": "The Mauryan Age", "page_start": 138, "page_end": 171, "topics": ["Extent of the empire", "Ashoka's Dhamma"]}]. Every chapter visible, even partly.
+- pyqs (pyq pages only): [{"number": 14, "question": "", "options": ["", "", "", ""], "answer": "", "exam": "SI", "year": 2019}]. Copy question numbers exactly as printed. exam is "SI", "PC" or "". answer only if printed on the page, else "".
+- exam / year at top level: the exam and year printed as the page heading, if any.
+- Never invent chapters, questions, numbers or years. If the page is unreadable, set confidence below 0.3."""
+)
+
+INTENT_PROMPT = (
+    """You route messages for a TSLPRB exam-prep Telegram bot. Return JSON only:
+{"intent": "", "number": null, "subject": null, "hour": null, "query": ""}
+
+INTENTS:
+- study_plan: asks what to study, what to prioritise, which chapter or topic first, weightage, how to plan
+- lookup: refers to a specific question by number ("Q14", "question 7", "the 12th one") or to "this question" / "this one". number = the question number, or null for "this one".
+- search: asks what their books or saved PYQs say about something ("PYQs on Ashoka", "what did Karim say about rajukas", "questions on the Preamble")
+- quiz: wants to be quizzed, tested or drilled
+- stats: asks about their progress, accuracy, score or weak areas
+- daily: wants a quiz every day at a time; hour = 0-23 in IST
+- daily_off: wants to stop the daily quiz
+- solve: anything else — a question to answer, a doubt, a calculation, chat
+
+subject, when the message names one, is one of: """
+    + _SUBJECT_LIST
+    + """. Otherwise null.
+query: the message rewritten as a standalone search query, resolving "this" / "it" using the current focus."""
+)
