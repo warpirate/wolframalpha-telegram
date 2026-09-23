@@ -85,25 +85,35 @@ class NebiusClient:
         messages.append({"role": "user", "content": user_text})
         return await self._complete(messages)
 
-    async def ask_image(self, user_text: str, image_bytes: bytes, mime_type: str) -> str:
-        """Answer a question about an image sent as an inline base64 data URL."""
-        if not image_bytes:
+    async def ask_image(
+        self,
+        user_text: str,
+        images: bytes | list[bytes],
+        mime_type: str,
+        history: list[dict] | None = None,
+    ) -> str:
+        """Answer a question about one or more images, sent as inline base64 data URLs.
+
+        Several images (a Telegram album) go in a single user turn, so the model
+        answers the question once with every page in view.
+        """
+        if isinstance(images, (bytes, bytearray)):
+            images = [bytes(images)]
+        images = [img for img in images if img]
+        if not images:
             raise AIError("I couldn't read that image. Please send it again.")
 
         prompt = (user_text or "").strip() or "Solve or explain what is in this image."
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        data_url = f"data:{mime_type};base64,{b64}"
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for image_bytes in images:
+            b64 = base64.b64encode(image_bytes).decode("ascii")
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}}
+            )
 
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(_sanitize_history(history))
+        messages.append({"role": "user", "content": content})
         return await self._complete(messages, model=self.vision_model)
 
     async def complete_raw(

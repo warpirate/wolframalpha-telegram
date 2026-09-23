@@ -70,6 +70,13 @@ ADD_MODE_TIMEOUT_SECONDS = 15 * 60
 QUESTIONS_PER_PAGE = 8
 DEFAULT_QUIZ_LENGTH = 10
 MAX_QUIZ_LENGTH = 50
+# Album photos arrive as separate updates a few hundred ms apart; wait this long
+# after the last one before treating the album as complete.
+ALBUM_SETTLE_SECONDS = 1.5
+ALBUM_DEFAULT_PROMPT = "Solve or explain what is in these images."
+
+# (chat_id, media_group_id) -> {"messages": [...], "last": monotonic time}
+_pending_albums: dict[tuple[int, str], dict[str, Any]] = {}
 
 GENERIC_ERROR = "Something went wrong. Please try again."
 EMPTY_TEXT_REPLY = "Send me a question, or a photo of one. /help shows everything."
@@ -171,6 +178,10 @@ async def _send_answer(update: Update, answer: str) -> None:
     message = update.effective_message
     if message is None:
         return
+    await _send_answer_to(message, answer)
+
+
+async def _send_answer_to(message, answer: str) -> None:
     chunks = prepare_for_telegram(answer)
     if not chunks:
         await message.reply_text(GENERIC_ERROR)
@@ -397,24 +408,75 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _handle_page_photo(update, context, mode)
         return
 
-    caption = (message.caption or "").strip() or IMAGE_DEFAULT_PROMPT
-    if len(caption) > MAX_PROMPT_CHARS:
-        caption = caption[:MAX_PROMPT_CHARS]
-
-    logger.info("Photo question from chat %s", message.chat_id)
-    try:
-        async with typing(context, message.chat_id):
-            image_bytes = await _download_photo(message, context)
-            if image_bytes is None:
-                return
-            answer = await _client(context).ask_image(caption, image_bytes, "image/jpeg")
-    except AIError as exc:
-        logger.error("AI error on image request: %s", exc.detail)
-        await message.reply_text(exc.user_message)
+    if message.media_group_id:
+        _queue_album_photo(message, context)
         return
 
-    _remember(context, f"[image] {caption}", answer)
-    await _send_answer(update, answer)
+    await _solve_photos(context, [message])
+
+
+def _queue_album_photo(message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Hold an album photo until the rest of the album has arrived.
+
+    Telegram delivers an album as separate messages sharing a media_group_id,
+    with the caption on only one of them. Answering each on its own gives one
+    reply per photo, most of them without the user's question.
+    """
+    key = (message.chat_id, message.media_group_id)
+    album = _pending_albums.get(key)
+    if album is None:
+        album = _pending_albums[key] = {"messages": [], "last": 0.0}
+        context.application.create_task(_flush_album(key, context))
+    album["messages"].append(message)
+    album["last"] = time.monotonic()
+
+
+async def _flush_album(key: tuple[int, str], context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Wait for the album to go quiet, then answer every photo in one go."""
+    while True:
+        delay = _pending_albums[key]["last"] + ALBUM_SETTLE_SECONDS - time.monotonic()
+        if delay <= 0:
+            break
+        await asyncio.sleep(delay)
+    album = _pending_albums.pop(key)
+    messages = sorted(album["messages"], key=lambda m: m.message_id)
+    await _solve_photos(context, messages)
+
+
+async def _solve_photos(context: ContextTypes.DEFAULT_TYPE, messages: list) -> None:
+    """Answer one photo, or a whole album, with a single model call."""
+    captioned = [m for m in messages if (m.caption or "").strip()]
+    anchor = captioned[0] if captioned else messages[0]
+    caption = (anchor.caption or "").strip()
+    count = len(messages)
+
+    prompt = caption or (IMAGE_DEFAULT_PROMPT if count == 1 else ALBUM_DEFAULT_PROMPT)
+    if len(prompt) > MAX_PROMPT_CHARS:
+        prompt = prompt[:MAX_PROMPT_CHARS]
+    if count > 1:
+        prompt = (
+            f"The user sent these {count} photos together as one message. Read them as one "
+            f"set and give one answer.\n\n{prompt}"
+        )
+
+    logger.info("Photo question from chat %s (%d image(s))", anchor.chat_id, count)
+    try:
+        async with typing(context, anchor.chat_id):
+            downloaded = await asyncio.gather(*(_download_photo(m, context) for m in messages))
+            images = [img for img in downloaded if img is not None]
+            if not images:
+                return
+            answer = await _client(context).ask_image(
+                prompt, images, "image/jpeg", history=_history(context)
+            )
+    except AIError as exc:
+        logger.error("AI error on image request: %s", exc.detail)
+        await anchor.reply_text(exc.user_message)
+        return
+
+    label = "[image]" if count == 1 else f"[{count} images]"
+    _remember(context, f"{label} {caption or prompt}", answer)
+    await _send_answer_to(anchor, answer)
 
 
 # ------------------------------------------------------------------ quiz flow
