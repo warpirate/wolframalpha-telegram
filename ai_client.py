@@ -143,6 +143,18 @@ class NebiusClient:
             payload["response_format"] = response_format
         return await self._send(payload)
 
+    async def embed(self, texts: list[str], model: str, dimensions: int) -> list[list[float]]:
+        """Embed texts in one request; results come back in input order."""
+        if not texts:
+            return []
+        payload = {"model": model, "input": texts, "dimensions": dimensions}
+        data = await self._post_with_retries(payload, endpoint=f"{self._base_url}/embeddings")
+        try:
+            rows = sorted(data["data"], key=lambda row: row["index"])
+            return [row["embedding"] for row in rows]
+        except (KeyError, TypeError) as exc:
+            raise AIError(FRIENDLY_GENERIC, detail=f"bad embeddings response: {exc!r}") from exc
+
     async def aclose(self) -> None:
         """Close the underlying HTTP connection pool."""
         await self._client.aclose()
@@ -189,12 +201,14 @@ class NebiusClient:
 
         raise AIError(FRIENDLY_EMPTY, detail="Model returned no content")
 
-    async def _post_with_retries(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_with_retries(
+        self, payload: dict[str, Any], endpoint: str | None = None
+    ) -> dict[str, Any]:
         last_error: AIError | None = None
 
         for attempt in range(MAX_ATTEMPTS):
             try:
-                response = await self._client.post(self._endpoint, json=payload)
+                response = await self._client.post(endpoint or self._endpoint, json=payload)
             except httpx.TimeoutException as exc:
                 last_error = AIError(FRIENDLY_TIMEOUT, detail=f"timeout: {exc!r}")
             except httpx.HTTPError as exc:

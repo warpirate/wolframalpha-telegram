@@ -49,6 +49,8 @@ NEBIUS_MODEL: str = _optional("NEBIUS_MODEL", "deepseek-ai/DeepSeek-V4.1-Flash")
 # Images go to the same model unless a dedicated vision model is configured.
 # Set this if NEBIUS_MODEL is a text-only model.
 NEBIUS_VISION_MODEL: str = _optional("NEBIUS_VISION_MODEL", NEBIUS_MODEL)
+# Embeddings for searching the user's saved pages and PYQs.
+NEBIUS_EMBED_MODEL: str = _optional("NEBIUS_EMBED_MODEL", "Qwen/Qwen3-Embedding-8B")
 
 # Storage backend. Unset means a local SQLite file (laptop); set to a Postgres
 # connection string to use a hosted database (cloud hosts with no persistent disk).
@@ -68,6 +70,7 @@ __all__ = [
     "NEBIUS_BASE_URL",
     "NEBIUS_MODEL",
     "NEBIUS_VISION_MODEL",
+    "NEBIUS_EMBED_MODEL",
     "DATABASE_URL",
     "PORT",
     "LOG_LEVEL",
