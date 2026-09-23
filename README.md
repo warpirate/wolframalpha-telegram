@@ -13,13 +13,18 @@ This bot never asks the model what it knows. It asks the model **what is printed
 the page you just photographed**.
 
 ```
-You:  /add polity
-You:  📷 [photo of a page from Laxmikanth]
+You:  📷 [index page of Karim's Indian History]
+Bot:  🗂 Saved 2 chapters of Indian History — M. Abdul Kareem: Pre-Mauryan Age, The Mauryan Age
 
-Bot:  ✅ Added 6 questions.
-      Subject: Polity
-      Topics: Fundamental Rights, Right to Property, Constitutional Remedies
+You:  📷 [a PYQ page]
+Bot:  📝 Saved 12 PYQs (SI 2019) — The Mauryan Age.
+
+You:  help with Q14
+Bot:  the answer, grounded in your own pages and PYQs, plus "Asked before:" matches
 ```
+
+No commands. Every photo is read, filed and indexed; every message is routed by what
+it asks.
 
 Every question, every option, and every explanation must be answerable from your page
 alone. If the page is blurry, upside down, or is just a chapter index, the bot returns
@@ -27,24 +32,39 @@ nothing and tells you why rather than inventing filler.
 
 ---
 
-## Two modes, one bot
+## What it does
 
-### 1. 🎯 Drill — your books become a question bank
+### 1. 📚 Your books become a searchable library
 
-| Step            | What happens                                                     |
-| --------------- | ---------------------------------------------------------------- |
-| `/add polity` | Arms add-mode for 15 minutes                                     |
-| 📷 Send a page  | Vision model reads it, writes up to 8 MCQs grounded in that page |
-| `/quiz`       | Serves questions with A/B/C/D inline buttons                     |
-| Tap an answer   | Instant ✅/❌, correct option highlighted, explanation shown     |
-| `/stats`      | Accuracy per subject with progress bars                          |
-| `/weak`       | Your worst topics, lowest accuracy first                         |
-| `/daily 6`    | 10 questions pushed to you at 6 AM IST, every day                |
+| You send                  | The bot                                                                  |
+| ------------------------- | ------------------------------------------------------------------------ |
+| 📷 A cover                | Registers the book (Laxmikanth, Karim, R.S. Aggarwal, Lucent's)          |
+| 📷 An index page          | Saves chapters with page ranges and topics                              |
+| 📷 A PYQ page             | Saves each question with exam, year and number, mapped to its chapter   |
+| 📷 A notes page           | Saves the text and writes up to 8 practice MCQs from it                 |
+| 📷 A question             | Saves it, then solves it using your saved material                      |
+
+Every save reply has **↩️ Undo** and **🔁 Wrong type** buttons. When the bot is unsure
+what a page is, it asks with buttons instead of guessing. Everything is embedded
+(Qwen3-Embedding-8B) and searchable.
+
+### 2. 🎯 Just ask
+
+| Say                       | You get                                                                  |
+| ------------------------- | ------------------------------------------------------------------------ |
+| what should I study?      | Chapters ranked by PYQ frequency × how much you've covered × how weak you are, plus subjects no book covers |
+| help with Q14             | That question from the page you're on, answered                          |
+| PYQs on Ashoka            | Matching PYQs and passages from your pages                               |
+| quiz me on polity         | A/B/C/D quiz from your practice MCQs                                     |
+| how am I doing?           | Accuracy per subject and your weakest topics                             |
+| daily quiz at 6am         | 10 questions pushed at 6 AM IST every day                                |
+
+Until about 30 PYQs are saved, the study plan uses estimated weightage and says so.
 
 Answers feed a **spaced-repetition scheduler**. Get one wrong and it returns in an hour.
 Get it right repeatedly and it drifts out to 12h → 24h → 3d → 1w → 2w → 30d.
 
-### 2. 🔬 Solve — send any question, get an answer sized to it
+### 3. 🔬 Solve — send any question, get an answer sized to it
 
 The paper is 200 MCQs in about three hours, so answers are built for speed, not
 completeness. The reply shape adapts to the question:
@@ -106,7 +126,7 @@ pip install -r requirements.txt
 cp .env.example .env            # Windows: copy .env.example .env
 # fill in TELEGRAM_BOT_TOKEN and NEBIUS_API_KEY
 
-python setup_botfather.py       # pushes the command menu (run once)
+python setup_botfather.py       # pushes the menu and descriptions (run once)
 python main.py
 ```
 
@@ -129,19 +149,7 @@ open **API keys**, create one.
 
 ## Commands
 
-| Command                         | What it does                                       |
-| ------------------------------- | -------------------------------------------------- |
-| `/add [subject]`              | Next photos become questions                       |
-| `/done`                       | Leave add-mode                                     |
-| `/quiz [subject] [n]`         | `/quiz polity 15` — defaults to 10, any subject |
-| `/stats`                      | Accuracy overall, today, and per subject           |
-| `/weak`                       | Weakest topics, lowest accuracy first              |
-| `/bank`                       | How many questions you have stored                 |
-| `/daily 6` / `/daily 21 20` | Daily quiz at an hour (IST), optional count        |
-| `/nodaily`                    | Cancel it                                          |
-| `/reset`                      | Clear the solver's short conversation memory       |
-
-Sending a photo **without** `/add` solves it instead of banking it.
+Only `/start`. Everything else is photos and plain messages (see above).
 
 ---
 
@@ -149,7 +157,7 @@ Sending a photo **without** `/add` solves it instead of banking it.
 
 ```
                   ┌──────────────┐
-   Telegram ─────▶│   main.py    │  handlers, add-mode routing, JobQueue
+   Telegram ─────▶│   main.py    │  handlers, router.py intent/page routing, JobQueue
                   └──────┬───────┘
                          │
         ┌────────────────┼──────────────────┐
@@ -167,6 +175,8 @@ Sending a photo **without** `/add` solves it instead of banking it.
   └───────────┘
 
   formatter.py  ── LaTeX→Unicode, MarkdownV2 escaping, 4096-char chunking
+  library.py    ── every photo → books · chapters · pages · pyqs · chunks (vectors)
+  retrieval.py  ── embeddings + search that grounds every answer in your pages
 ```
 
 ### Design notes worth knowing
@@ -231,6 +241,8 @@ down until under 3 MB, all in a worker thread so the event loop never blocks. A
 | `NEBIUS_BASE_URL`     |          | `https://api.studio.nebius.ai/v1` | Any OpenAI-compatible endpoint     |
 | `NEBIUS_MODEL`        |          | `deepseek-ai/DeepSeek-V4.1-Flash` | Text model                         |
 | `NEBIUS_VISION_MODEL` |          | same as above                       | Photo model                        |
+| `NEBIUS_EMBED_MODEL`  |          | `Qwen/Qwen3-Embedding-8B`         | Embeddings for search (1024 dims)  |
+| `DATABASE_URL`        |          | unset → SQLite                     | Postgres DSN; needs pgvector       |
 | `LOG_LEVEL`           |          | `INFO`                            | `DEBUG` for verbose              |
 | `HISTORY_TURNS`       |          | `4`                               | Solver memory depth,`0` disables |
 
@@ -282,6 +294,10 @@ DATABASE_URL set    -> Postgres  (hosts with no persistent disk)
 DATABASE_URL unset  -> SQLite    (local, unchanged)
 ```
 
+On Postgres the bot runs `CREATE EXTENSION IF NOT EXISTS vector` at startup and keeps
+embeddings in a `vector(1024)` column with an HNSW index (Neon and Supabase both ship
+pgvector). On SQLite embeddings are float32 blobs searched by brute force.
+
 Serverless platforms (Vercel, Netlify) and Telegram-bot sandboxes (TeleBotHost and
 similar) will **not** work: this is a long-running Python process that needs pip
 packages, a scheduler, and calls that run 20+ seconds. Those platforms offer none of
@@ -295,10 +311,16 @@ the four.
 
 | File                   | Role                                                                 |
 | ---------------------- | -------------------------------------------------------------------- |
-| `main.py`            | Handlers, add-mode routing, image preprocessing, JobQueue, lifecycle |
-| `ai_client.py`       | Async Nebius client, retry/backoff, reasoning-starvation recovery    |
-| `mcq.py`             | Page → MCQs, defensive JSON parsing, validation                     |
-| `db.py`              | SQLite: question bank, attempts, review scheduling, preferences      |
+| `main.py`            | Handlers, photo/text routing, buttons, JobQueue, lifecycle           |
+| `router.py`          | Photo → page kind + extracted content; text → intent                 |
+| `library.py`         | Saves each photo by kind, focus, PYQ lookup, grounded prompts        |
+| `retrieval.py`       | Chunking, embeddings, similarity search                              |
+| `ranking.py`         | "What should I study" from PYQs, coverage and weakness               |
+| `syllabus.py`        | The four books, subjects, estimated weightage                        |
+| `jsonutil.py`        | Tolerant JSON parsing for model output                               |
+| `ai_client.py`       | Async Nebius client, retry/backoff, embeddings                       |
+| `mcq.py`             | Page text → MCQs, validation                                         |
+| `db.py` / `db_pg.py` | SQLite / Postgres: library, vectors, question bank, reviews, prefs   |
 | `quiz.py`            | Session flow, inline keyboards, scoring, MarkdownV2 rendering        |
 | `formatter.py`       | LaTeX→Unicode, MarkdownV2 escaping, chunking                        |
 | `exam_prompts.py`    | Grounding prompt and subject taxonomy                                |
@@ -317,8 +339,8 @@ Your question bank lives in `exam.db` (gitignored — it is personal data).
 - **Current affairs are out of scope.** No live news source, and the model has a
   knowledge cutoff. Photographing a monthly current-affairs magazine works; asking the
   bot "what happened this week" does not.
-- **The bot only knows what you feed it.** It has no syllabus coverage map and will not
-  tell you what you haven't studied.
+- **The bot only knows what you feed it.** Its study plan is only as good as the PYQs
+  you've photographed; until about 30 are in, weightage is an estimate.
 - **Open-ended questions take ~20 s** because reasoning runs before any output. Straight
   computation is ~6 s.
 - **Single-user by design.** Data is keyed by Telegram user id and it works fine for a
@@ -328,9 +350,9 @@ Your question bank lives in `exam.db` (gitignored — it is personal data).
 
 ## Roadmap
 
-- [ ] Previous-year question import
+- [x] Previous-year question import
+- [x] Syllabus coverage — study plan ranked from your PYQs and progress
 - [ ] Timed full-length mock tests with a real 200-question paper structure
-- [ ] Syllabus coverage map — what you've drilled vs what the exam covers
 - [ ] Wolfram MCP integration for exact computation ([server](https://www.wolfram.com/artificial-intelligence/mcp/cloud/) is free and needs no auth)
 - [ ] Telugu support for the SI language paper
 - [ ] Export the bank to Anki
