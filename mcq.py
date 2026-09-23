@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
-import re
 from typing import Any
 
 from ai_client import AIError, NebiusClient
 from exam_prompts import MCQ_SYSTEM_PROMPT, SUBJECTS, mcq_user_prompt
+from jsonutil import JSONParseError, complete_json, loads_loose
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +19,6 @@ _SUBJECT_LOOKUP = {s.lower(): s for s in SUBJECTS}
 
 class MCQError(Exception):
     """Raised when a page could not be turned into usable questions."""
-
-
-def _strip_code_fence(text: str) -> str:
-    fenced = re.search(r"```(?:json)?\s*(.+?)```", text, re.S)
-    return fenced.group(1).strip() if fenced else text.strip()
 
 
 def _find_question_list(node: Any, depth: int = 0) -> list | None:
@@ -56,17 +50,10 @@ def _find_question_list(node: Any, depth: int = 0) -> list | None:
 
 def parse_questions(raw: str) -> tuple[list[dict], str]:
     """Parse and validate the model's JSON. Returns (questions, note)."""
-    text = _strip_code_fence(raw)
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"[\[{].*[\]}]", text, re.S)
-        if not match:
-            raise MCQError("The model did not return usable JSON.")
-        try:
-            payload = json.loads(match.group(0))
-        except json.JSONDecodeError as exc:
-            raise MCQError("The model did not return usable JSON.") from exc
+        payload = loads_loose(raw)
+    except JSONParseError as exc:
+        raise MCQError("The model did not return usable JSON.") from exc
 
     note = ""
     if isinstance(payload, dict):
@@ -145,7 +132,7 @@ async def generate_from_image(
             ],
         },
     ]
-    raw = await _complete_json(client, messages)
+    raw = await complete_json(client, messages)
     return parse_questions(raw)
 
 
@@ -160,19 +147,6 @@ async def generate_from_text(
         {"role": "system", "content": MCQ_SYSTEM_PROMPT},
         {"role": "user", "content": f"{mcq_user_prompt(count, hint)}\n\nPAGE TEXT:\n{passage}"},
     ]
-    raw = await _complete_json(client, messages)
+    raw = await complete_json(client, messages)
     return parse_questions(raw)
 
-
-async def _complete_json(client: NebiusClient, messages: list[dict]) -> str:
-    """Ask for JSON, retrying once without response_format if the API rejects it."""
-    try:
-        return await client.complete_raw(
-            messages,
-            max_tokens=3000,
-            temperature=0.4,
-            response_format={"type": "json_object"},
-        )
-    except AIError as exc:
-        logger.warning("JSON mode failed (%s); retrying without response_format", exc.detail)
-        return await client.complete_raw(messages, max_tokens=3000, temperature=0.4)
