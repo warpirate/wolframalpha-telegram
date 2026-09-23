@@ -14,6 +14,7 @@ SQLite differences handled here:
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -76,6 +77,90 @@ CREATE TABLE IF NOT EXISTS prefs (
 );
 """
 
+EMBED_DIMENSIONS = 1024
+
+SCHEMA_LIBRARY = f"""
+CREATE EXTENSION IF NOT EXISTS vector;
+
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS batch_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS chapter_id BIGINT;
+
+CREATE TABLE IF NOT EXISTS books (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT      NOT NULL,
+    key         TEXT        NOT NULL,
+    title       TEXT        NOT NULL,
+    subject     TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS chapters (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT  NOT NULL,
+    book_id     BIGINT  NOT NULL,
+    number      INTEGER,
+    title       TEXT    NOT NULL,
+    page_start  INTEGER,
+    page_end    INTEGER,
+    topics      TEXT    NOT NULL DEFAULT '[]',
+    batch_id    TEXT    NOT NULL DEFAULT '',
+    UNIQUE (book_id, title)
+);
+
+CREATE TABLE IF NOT EXISTS pages (
+    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id        BIGINT      NOT NULL,
+    book_id        BIGINT,
+    chapter_id     BIGINT,
+    page_no        INTEGER,
+    kind           TEXT        NOT NULL,
+    subject        TEXT        NOT NULL,
+    topic          TEXT        NOT NULL,
+    text           TEXT        NOT NULL,
+    file_id        TEXT        NOT NULL,
+    file_unique_id TEXT        NOT NULL,
+    batch_id       TEXT        NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, file_unique_id)
+);
+
+CREATE TABLE IF NOT EXISTS pyqs (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT      NOT NULL,
+    book_id     BIGINT,
+    chapter_id  BIGINT,
+    page_id     BIGINT,
+    exam        TEXT        NOT NULL DEFAULT '',
+    year        INTEGER,
+    number      INTEGER,
+    question    TEXT        NOT NULL,
+    options     TEXT        NOT NULL DEFAULT '[]',
+    answer      TEXT        NOT NULL DEFAULT '',
+    subject     TEXT        NOT NULL,
+    topic       TEXT        NOT NULL,
+    batch_id    TEXT        NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id, question)
+);
+CREATE INDEX IF NOT EXISTS idx_pyqs_number ON pyqs(user_id, number);
+
+CREATE TABLE IF NOT EXISTS chunks (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id     BIGINT  NOT NULL,
+    source      TEXT    NOT NULL,
+    source_id   BIGINT  NOT NULL,
+    subject     TEXT    NOT NULL,
+    topic       TEXT    NOT NULL,
+    text        TEXT    NOT NULL,
+    embedding   vector({EMBED_DIMENSIONS}) NOT NULL,
+    batch_id    TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_user ON chunks(user_id, source);
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
+"""
+
+
 
 async def connect(dsn: str) -> None:
     """Create the pool and ensure the schema exists. Safe to call repeatedly."""
@@ -97,6 +182,7 @@ async def connect(dsn: str) -> None:
     )
     async with _pool.acquire() as conn:
         await conn.execute(SCHEMA)
+        await conn.execute(SCHEMA_LIBRARY)
     logger.info("Postgres pool ready")
 
 
@@ -113,7 +199,13 @@ def now_ist() -> datetime:
 # ------------------------------------------------------------------ questions
 
 
-async def add_questions(user_id: int, items: Iterable[dict], source: str) -> int:
+async def add_questions(
+    user_id: int,
+    items: Iterable[dict],
+    source: str,
+    batch_id: str = "",
+    chapter_id: int | None = None,
+) -> int:
     """Insert generated questions, skipping exact duplicates. Returns count added."""
     pool = _require_pool()
     added = 0
@@ -123,8 +215,8 @@ async def add_questions(user_id: int, items: Iterable[dict], source: str) -> int
             result = await conn.execute(
                 """INSERT INTO questions
                    (user_id, subject, topic, question, opt_a, opt_b, opt_c, opt_d,
-                    correct, explanation, source, created_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    correct, explanation, source, created_at, batch_id, chapter_id)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                    ON CONFLICT DO NOTHING""",
                 user_id,
                 item.get("subject", "General"),
@@ -135,6 +227,8 @@ async def add_questions(user_id: int, items: Iterable[dict], source: str) -> int
                 item.get("explanation", ""),
                 source,
                 now_ist(),
+                batch_id,
+                chapter_id,
             )
             if result.endswith("1"):
                 added += 1
@@ -325,6 +419,244 @@ async def all_daily() -> list[dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM prefs WHERE daily_hour IS NOT NULL")
     return [dict(row) for row in rows]
+
+
+# -------------------------------------------------------------------- library
+
+
+def _vector_literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{x:.7g}" for x in vector) + "]"
+
+
+def _json_list(value) -> list:
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _rowcount(status: str) -> int:
+    try:
+        return int(status.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+async def upsert_book(user_id: int, key: str, title: str, subject: str) -> int:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO books (user_id, key, title, subject) VALUES ($1,$2,$3,$4)
+               ON CONFLICT (user_id, key) DO NOTHING""",
+            user_id, key, title, subject,
+        )
+        return await conn.fetchval(
+            "SELECT id FROM books WHERE user_id = $1 AND key = $2", user_id, key
+        )
+
+
+async def upsert_chapter(user_id: int, book_id: int, chapter: dict, batch_id: str) -> tuple[int, bool]:
+    pool = _require_pool()
+    topics = json.dumps(chapter.get("topics") or [])
+    async with pool.acquire() as conn:
+        existing = await conn.fetchval(
+            "SELECT id FROM chapters WHERE book_id = $1 AND title = $2", book_id, chapter["title"]
+        )
+        if existing:
+            await conn.execute(
+                """UPDATE chapters SET
+                     number = COALESCE($1, number),
+                     page_start = COALESCE($2, page_start),
+                     page_end = COALESCE($3, page_end),
+                     topics = CASE WHEN $4 = '[]' THEN topics ELSE $4 END
+                   WHERE id = $5""",
+                chapter.get("number"), chapter.get("page_start"), chapter.get("page_end"),
+                topics, existing,
+            )
+            return existing, False
+        new_id = await conn.fetchval(
+            """INSERT INTO chapters (user_id, book_id, number, title, page_start, page_end, topics, batch_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
+            user_id, book_id, chapter.get("number"), chapter["title"], chapter.get("page_start"),
+            chapter.get("page_end"), topics, batch_id,
+        )
+        return new_id, True
+
+
+async def find_chapter_for_page(user_id: int, book_id: int, page_no: int) -> dict | None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT * FROM chapters
+               WHERE user_id = $1 AND book_id = $2 AND page_start <= $3
+                 AND (page_end IS NULL OR page_end >= $3)
+               ORDER BY page_start DESC LIMIT 1""",
+            user_id, book_id, page_no,
+        )
+    if row is None:
+        return None
+    data = dict(row)
+    data["topics"] = _json_list(data.get("topics"))
+    return data
+
+
+async def add_page(user_id: int, page: dict, batch_id: str) -> int | None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            """INSERT INTO pages (user_id, book_id, chapter_id, page_no, kind, subject, topic,
+                                  text, file_id, file_unique_id, batch_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               ON CONFLICT (user_id, file_unique_id) DO NOTHING
+               RETURNING id""",
+            user_id, page.get("book_id"), page.get("chapter_id"), page.get("page_no"),
+            page["kind"], page["subject"], page["topic"], page["text"], page["file_id"],
+            page["file_unique_id"], batch_id,
+        )
+
+
+async def get_page(user_id: int, page_id: int) -> dict | None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM pages WHERE user_id = $1 AND id = $2", user_id, page_id
+        )
+    return dict(row) if row else None
+
+
+async def add_pyq(user_id: int, item: dict, batch_id: str) -> int | None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            """INSERT INTO pyqs (user_id, book_id, chapter_id, page_id, exam, year, number,
+                                 question, options, answer, subject, topic, batch_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               ON CONFLICT (user_id, question) DO NOTHING
+               RETURNING id""",
+            user_id, item.get("book_id"), item.get("chapter_id"), item.get("page_id"),
+            item.get("exam", ""), item.get("year"), item.get("number"), item["question"],
+            json.dumps(item.get("options") or []), item.get("answer", ""), item["subject"],
+            item["topic"], batch_id,
+        )
+
+
+async def find_pyq(
+    user_id: int, number: int, page_id: int | None = None, chapter_id: int | None = None
+) -> dict | None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        row = None
+        for column, value in (("page_id", page_id), ("chapter_id", chapter_id)):
+            if value is None:
+                continue
+            row = await conn.fetchrow(
+                f"""SELECT * FROM pyqs WHERE user_id = $1 AND number = $2 AND {column} = $3
+                    ORDER BY id DESC LIMIT 1""",
+                user_id, number, value,
+            )
+            if row:
+                break
+        if row is None:
+            row = await conn.fetchrow(
+                "SELECT * FROM pyqs WHERE user_id = $1 AND number = $2 ORDER BY id DESC LIMIT 1",
+                user_id, number,
+            )
+    if row is None:
+        return None
+    data = dict(row)
+    data["options"] = _json_list(data.get("options"))
+    return data
+
+
+async def pyq_counts(user_id: int) -> list[dict]:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT p.subject AS subject, p.chapter_id AS chapter_id,
+                      COALESCE(c.title, p.topic) AS title, p.exam AS exam, COUNT(*) AS n
+               FROM pyqs p LEFT JOIN chapters c ON c.id = p.chapter_id
+               WHERE p.user_id = $1
+               GROUP BY p.subject, p.chapter_id, COALESCE(c.title, p.topic), p.exam""",
+            user_id,
+        )
+    return [dict(row) for row in rows]
+
+
+async def topic_progress(user_id: int) -> dict:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        pages = await conn.fetch(
+            """SELECT p.subject AS subject, p.chapter_id AS chapter_id,
+                      COALESCE(c.title, p.topic) AS title, COUNT(*) AS pages
+               FROM pages p LEFT JOIN chapters c ON c.id = p.chapter_id
+               WHERE p.user_id = $1 AND p.kind = 'content'
+               GROUP BY p.subject, p.chapter_id, COALESCE(c.title, p.topic)""",
+            user_id,
+        )
+        attempts = await conn.fetch(
+            """SELECT q.subject AS subject, q.chapter_id AS chapter_id,
+                      COALESCE(c.title, q.topic) AS title, COUNT(*) AS attempts,
+                      COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END), 0) AS correct
+               FROM attempts a
+               JOIN questions q ON q.id = a.question_id
+               LEFT JOIN chapters c ON c.id = q.chapter_id
+               WHERE a.user_id = $1
+               GROUP BY q.subject, q.chapter_id, COALESCE(c.title, q.topic)""",
+            user_id,
+        )
+    return {"pages": [dict(r) for r in pages], "attempts": [dict(r) for r in attempts]}
+
+
+async def add_chunks(
+    user_id: int,
+    source: str,
+    source_id: int,
+    rows: list[tuple[str, list[float]]],
+    subject: str,
+    topic: str,
+    batch_id: str,
+) -> None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO chunks (user_id, source, source_id, subject, topic, text, embedding, batch_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8)""",
+            [(user_id, source, source_id, subject, topic, text, _vector_literal(vector), batch_id)
+             for text, vector in rows],
+        )
+
+
+async def search_chunks(
+    user_id: int, vector: list[float], k: int, sources: list[str] | None = None
+) -> list[dict]:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, source, source_id, subject, topic, text,
+                      1 - (embedding <=> $2::vector) AS score
+               FROM chunks
+               WHERE user_id = $1 AND ($3::text[] IS NULL OR source = ANY($3::text[]))
+               ORDER BY embedding <=> $2::vector
+               LIMIT $4""",
+            user_id, _vector_literal(vector), sources, k,
+        )
+    return [dict(row) for row in rows]
+
+
+async def undo_batch(user_id: int, batch_id: str) -> int:
+    if not batch_id:
+        return 0
+    pool = _require_pool()
+    removed = 0
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for table in ("chunks", "pyqs", "pages", "chapters", "questions"):
+                status = await conn.execute(
+                    f"DELETE FROM {table} WHERE user_id = $1 AND batch_id = $2", user_id, batch_id
+                )
+                removed += _rowcount(status)
+    return removed
 
 
 async def aclose() -> None:
