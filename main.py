@@ -363,8 +363,29 @@ def _kind_keyboard(batch_id: str, page_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([buttons[:3], buttons[3:], [_undo_button(batch_id)]])
 
 
+def _saved_lines(saves: list) -> list[str]:
+    """One line per save, except several index pages of one book become a single total."""
+    index_groups: dict[str, list] = {}
+    for saved in saves:
+        if saved.kind == "index" and saved.chapters_saved and not saved.duplicate:
+            index_groups.setdefault(saved.book_title, []).append(saved)
+    lines: list[str] = []
+    for saved in sorted(saves, key=lambda s: s.kind != "cover"):
+        group = index_groups.get(saved.book_title) if saved.kind == "index" else None
+        if group and len(group) > 1:
+            if saved is group[0]:
+                total = sum(s.chapters_saved for s in group)
+                lines.append(f"🗂 Saved {total} chapters of {saved.book_title}.")
+            continue
+        if saved.summary:
+            lines.append(saved.summary)
+    if saves and all(s.kind == "cover" for s in saves):
+        lines.append("Send the index pages next.")
+    return lines
+
+
 async def _reply_saved(anchor, done: list, batch_id: str) -> None:
-    lines = [saved.summary for saved, _ in done if saved.summary]
+    lines = _saved_lines([saved for saved, _ in done])
     if not lines:
         return
     fresh = [saved for saved, _ in done if saved.page_id is not None]
@@ -504,7 +525,7 @@ async def _route_solve(message, context, user_id, text, intent, focus) -> None:
 
 async def _route_study_plan(message, context, user_id, text, intent, focus) -> None:
     units = ranking.build_units(await db.pyq_counts(user_id), await db.topic_progress(user_id))
-    await message.reply_text(ranking.render_plan(units))
+    await message.reply_text(ranking.render_plan(units, await db.list_chapters(user_id)))
 
 
 async def _route_lookup(message, context, user_id, text, intent, focus) -> None:
@@ -536,7 +557,8 @@ async def _route_search(message, context, user_id, text, intent, focus) -> None:
         return
     prompt = (
         "Answer using ONLY the material below from the user's saved pages and PYQs. "
-        "List any matching PYQs with their exam and year. Cite as [n].\n\n"
+        "List any matching PYQs with their exam and year. Do not write [n] markers; name "
+        "sources in plain words (book and chapter).\n\n"
         f"{retrieval.render_context(hits)}\n\nThe user's request:\n{text}"
     )
     try:

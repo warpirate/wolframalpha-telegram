@@ -40,8 +40,8 @@ def test_weak_topic_is_boosted():
 
 def test_plan_uses_estimates_when_few_pyqs():
     text = ranking.render_plan(ranking.build_units([_pyq(1, "Mauryan Age", "SI", 3)], {}))
-    assert "estimate" in text.lower()
-    assert "Reasoning" in text and "no book" in text
+    assert "estimate" in text.lower() and "Only 1 PYQ " not in text
+    assert "Reasoning" in text and "no book" in text.lower()
 
 
 def test_plan_ranks_when_enough_pyqs():
@@ -49,3 +49,32 @@ def test_plan_ranks_when_enough_pyqs():
     text = ranking.render_plan(ranking.build_units(rows, {}))
     assert text.index("Chapter 1") < text.index("Chapter 2")
     assert "No book yet for" in text
+
+
+def _chapter(cid, number, title, book="rs_aggarwal", subject="Arithmetic"):
+    return {"id": cid, "number": number, "title": title, "book_key": book,
+            "book_title": "Quantitative Aptitude — R.S. Aggarwal" if book == "rs_aggarwal" else "Karim",
+            "subject": subject}
+
+
+def test_chapter_plan_puts_high_first_and_parks_low():
+    chapters = [_chapter(1, 29, "Stocks and Shares"), _chapter(2, 7, "Problems on Numbers"),
+                _chapter(3, 11, "Percentage"), _chapter(4, 1, "Number System"),
+                _chapter(5, 3, "The Mauryan Age", book="karim", subject="History")]
+    text = ranking.render_plan([], chapters)
+    assert text.startswith("No PYQs saved yet")
+    assert text.index("Number System") < text.index("Percentage") < text.index("Problems on Numbers")
+    assert "Leave for last: Stocks and Shares" in text
+    assert text.index("R.S. Aggarwal") < text.index("Karim")  # Arithmetic outweighs History
+    assert "Laxmikanth" in text and "Lucent" in text  # books not yet added
+    assert "No book yet for: Reasoning" in text
+
+
+def test_chapter_plan_skips_strong_and_flags_in_progress():
+    chapters = [_chapter(1, 1, "Number System"), _chapter(3, 11, "Percentage")]
+    progress = {"pages": [{"subject": "Arithmetic", "chapter_id": 3, "title": "Percentage", "pages": 2}],
+                "attempts": [{"subject": "Arithmetic", "chapter_id": 1, "title": "Number System",
+                              "attempts": 10, "correct": 9}]}
+    text = ranking.render_plan(ranking.build_units([], progress), chapters)
+    assert "Number System" not in text  # already strong
+    assert "Percentage — ch 11 · in progress" in text

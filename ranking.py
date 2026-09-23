@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import syllabus
 
 TOP_N = 8
+PER_BOOK = 8
 STRONG_ACCURACY = 0.7
 MIN_ATTEMPTS_FOR_STRONG = 3
 _STATUS = {0.0: "not started", 0.5: "in progress", 1.0: "strong"}
@@ -96,28 +97,86 @@ def _unit_line(number: int, unit: Unit) -> str:
     )
 
 
-def render_plan(units: list[Unit], exam: str = "SI") -> str:
+def _share(subject: str) -> str:
+    return f"~{round(syllabus.ESTIMATED_SHARE.get(subject, 0) * 100)}%"
+
+
+def _chapter_lines(chapters: list[dict], units: list[Unit]) -> list[str]:
+    """Per saved book: estimated high-priority chapters first, low ones parked at the end."""
+    by_key = {u.key: u for u in units}
+    books: dict[str, list[dict]] = {}
+    for chapter in chapters:
+        books.setdefault(chapter["book_key"], []).append(chapter)
+    order = sorted(books, key=lambda k: -syllabus.ESTIMATED_SHARE.get(books[k][0]["subject"], 0))
+
+    lines: list[str] = []
+    for book_key in order:
+        rows = books[book_key]
+        first = rows[0]
+        rated = []
+        for row in rows:
+            unit = by_key.get(f"c{row['id']}")
+            done = coverage(unit) if unit else 0.0
+            priority = syllabus.chapter_priority(book_key, row["title"])
+            rated.append((syllabus.PRIORITY_RANK[priority], done, row.get("number") or 999, row, priority))
+        rated.sort(key=lambda item: item[:3])
+        todo = [item for item in rated if item[4] != "low" and item[1] < 1.0]
+        low = [item[3]["title"] for item in rated if item[4] == "low"]
+
+        lines.append(f"📘 {first['book_title']} ({first['subject']} {_share(first['subject'])})")
+        if todo:
+            lines.append("Start with:")
+            for i, (_, done, _, row, priority) in enumerate(todo[:PER_BOOK], 1):
+                number = f" — ch {row['number']}" if row.get("number") else ""
+                flag = " · in progress" if done else ""
+                lines.append(f"{i}. {row['title']}{number}{flag}")
+            extra = [t[3]["title"] for t in todo[PER_BOOK:] if t[4] == "high"]
+            if extra:
+                lines.append("Then: " + ", ".join(extra))
+        if low:
+            lines.append("Leave for last: " + ", ".join(low))
+        lines.append("")
+    return lines
+
+
+def render_plan(units: list[Unit], chapters: list[dict] | None = None, exam: str = "SI") -> str:
     total = sum(u.pyqs for u in units)
     book_subjects = {b["subject"] for b in syllabus.BOOKS.values()}
+    chapters = chapters or []
     lines: list[str] = []
 
     if total < syllabus.MIN_PYQS_FOR_REAL_WEIGHTS:
-        lines.append(
-            f"Only {total} PYQ{'s' if total != 1 else ''} saved so far, so this is an estimate until about "
-            f"{syllabus.MIN_PYQS_FOR_REAL_WEIGHTS} are in."
-        )
+        if total == 0:
+            lines.append("No PYQs saved yet, so this plan uses estimated priorities.")
+        else:
+            lines.append(
+                f"Only {total} PYQ{'s' if total != 1 else ''} saved so far, so this plan uses "
+                f"estimated priorities until about {syllabus.MIN_PYQS_FOR_REAL_WEIGHTS} are in."
+            )
         lines.append("")
-        lines.append("Share of the paper by subject (estimate):")
-        for subject, share in sorted(syllabus.ESTIMATED_SHARE.items(), key=lambda kv: -kv[1]):
-            mark = "📘 your book" if subject in book_subjects else "⚠️ no book"
-            lines.append(f"• {subject} ~{round(share * 100)}% — {mark}")
+        if chapters:
+            lines.extend(_chapter_lines(chapters, units))
+        else:
+            lines.append("Share of the paper by subject (estimate):")
+            for subject, share in sorted(syllabus.ESTIMATED_SHARE.items(), key=lambda kv: -kv[1]):
+                mark = "📘 your book" if subject in book_subjects else "⚠️ no book"
+                lines.append(f"• {subject} ~{round(share * 100)}% — {mark}")
+            lines.append("")
         ranked = [u for u in score_units(units, exam) if u.pyqs][:TOP_N]
         if ranked:
-            lines.append("")
             lines.append("From the PYQs you've saved:")
             lines.extend(_unit_line(i, u) for i, u in enumerate(ranked, 1))
-        lines.append("")
-        lines.append("Send PYQ pages from your books and this becomes a real ranking.")
+            lines.append("")
+        if chapters:
+            gaps = syllabus.uncovered_subjects()
+            if gaps:
+                lines.append("⚠️ No book yet for: " + ", ".join(f"{g} {_share(g)}" for g in gaps))
+            saved_books = {c["book_key"] for c in chapters}
+            missing = [syllabus.book_title(k) for k in syllabus.BOOKS if k not in saved_books]
+            if missing:
+                lines.append("Send the index pages of " + " and ".join(missing) + " to add them.")
+            lines.append("")
+        lines.append("Photograph previous papers and this switches to real PYQ counts.")
         return "\n".join(lines)
 
     ranked = score_units(units, exam)[:TOP_N]

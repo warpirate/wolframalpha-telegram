@@ -88,3 +88,20 @@ def test_render_similar_skips_the_question_being_asked():
     ]
     text = library.render_similar(hits, exclude="SI 2019 · Q14\nWhich Mauryan king issued the Dhamma edicts?")
     assert "father" in text and "edicts" not in text
+
+
+def test_album_reply_merges_index_pages_and_puts_cover_first():
+    import os
+    os.environ.setdefault("TELEGRAM_BOT_TOKEN", "t")
+    import main
+    from router import PageRead
+
+    def saved(kind, summary, chapters=0):
+        return library.Saved(kind, 1, None, "", summary, PageRead(kind=kind), False,
+                             chapters_saved=chapters, book_title="R.S. Aggarwal")
+
+    lines = main._saved_lines([saved("index", "🗂 Saved 20 chapters…", 20),
+                               saved("index", "🗂 Saved 19 chapters…", 19),
+                               saved("cover", "📘 R.S. Aggarwal.")])
+    assert lines == ["📘 R.S. Aggarwal.", "🗂 Saved 39 chapters of R.S. Aggarwal."]
+    assert main._saved_lines([saved("cover", "📘 R.S. Aggarwal.")])[-1] == "Send the index pages next."

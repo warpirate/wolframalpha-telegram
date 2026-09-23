@@ -490,6 +490,22 @@ def _chapter_dict(row) -> dict:
     return data
 
 
+def _list_chapters(conn, user_id: int):
+    return conn.execute(
+        """SELECT c.id, c.number, c.title, c.page_start, c.page_end, c.topics,
+                  b.key AS book_key, b.title AS book_title, b.subject AS subject
+           FROM chapters c JOIN books b ON b.id = c.book_id
+           WHERE c.user_id = ?
+           ORDER BY b.id, c.number, c.id""",
+        (user_id,),
+    ).fetchall()
+
+
+async def list_chapters(user_id: int) -> list[dict]:
+    """Every saved chapter with its book, in book order."""
+    return [_chapter_dict(row) for row in await call(_list_chapters, user_id)]
+
+
 def _find_chapter_for_page(conn, user_id: int, book_id: int, page_no: int):
     return conn.execute(
         """SELECT * FROM chapters
@@ -721,6 +737,7 @@ if USING_POSTGRES:
     all_daily = db_pg.all_daily                  # type: ignore[assignment]
     upsert_book = db_pg.upsert_book              # type: ignore[assignment]
     upsert_chapter = db_pg.upsert_chapter        # type: ignore[assignment]
+    list_chapters = db_pg.list_chapters                # type: ignore[assignment]
     find_chapter_for_page = db_pg.find_chapter_for_page# type: ignore[assignment]
     add_page = db_pg.add_page                    # type: ignore[assignment]
     get_page = db_pg.get_page                    # type: ignore[assignment]

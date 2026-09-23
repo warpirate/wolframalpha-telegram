@@ -484,6 +484,25 @@ async def upsert_chapter(user_id: int, book_id: int, chapter: dict, batch_id: st
         return new_id, True
 
 
+async def list_chapters(user_id: int) -> list[dict]:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT c.id, c.number, c.title, c.page_start, c.page_end, c.topics,
+                      b.key AS book_key, b.title AS book_title, b.subject AS subject
+               FROM chapters c JOIN books b ON b.id = c.book_id
+               WHERE c.user_id = $1
+               ORDER BY b.id, c.number, c.id""",
+            user_id,
+        )
+    result = []
+    for row in rows:
+        data = dict(row)
+        data["topics"] = _json_list(data.get("topics"))
+        result.append(data)
+    return result
+
+
 async def find_chapter_for_page(user_id: int, book_id: int, page_no: int) -> dict | None:
     pool = _require_pool()
     async with pool.acquire() as conn:

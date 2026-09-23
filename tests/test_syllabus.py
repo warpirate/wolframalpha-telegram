@@ -22,3 +22,15 @@ def test_uncovered_subjects_excludes_the_four_books():
 
 def test_estimates_sum_to_one():
     assert abs(sum(syllabus.ESTIMATED_SHARE.values()) - 1.0) < 1e-9
+
+
+def test_chapter_priority_matches_specific_keywords_first():
+    assert syllabus.chapter_priority("rs_aggarwal", "Percentage") == "high"
+    assert syllabus.chapter_priority("rs_aggarwal", "Banker's Discount") == "low"
+    assert syllabus.chapter_priority("rs_aggarwal", "Volume and Surface Areas") == "medium"
+    assert syllabus.chapter_priority("karim", "The Post-Gupta Age") == "medium"
+    assert syllabus.chapter_priority("karim", "The Age of Guptas") == "high"
+    assert syllabus.chapter_priority("karim", "The Pre-Mauryan Age") == "high"
+    assert syllabus.chapter_priority("karim", "Pre-historic Cultures") == "low"
+    assert syllabus.chapter_priority("karim", "Something unknown") == "medium"
+    assert syllabus.chapter_priority("nope", "Percentage") == "medium"

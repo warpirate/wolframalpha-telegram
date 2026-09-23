@@ -96,3 +96,15 @@ def test_counts_and_progress(sqlite_db):
     progress = run(sqlite_db.topic_progress(1))
     assert progress["pages"][0]["chapter_id"] == cid and progress["pages"][0]["pages"] == 1
     assert progress["attempts"] == []
+
+
+def test_list_chapters_joins_book(sqlite_db):
+    book = run(sqlite_db.upsert_book(1, "rs_aggarwal", "Quantitative Aptitude", "Arithmetic"))
+    run(sqlite_db.upsert_chapter(1, book, {"number": 12, "title": "Profit and Loss",
+                                            "page_start": 249, "page_end": 281, "topics": []}, "b1"))
+    run(sqlite_db.upsert_chapter(1, book, {"number": 11, "title": "Percentage",
+                                            "page_start": 209, "page_end": 248, "topics": []}, "b1"))
+    rows = run(sqlite_db.list_chapters(1))
+    assert [r["title"] for r in rows] == ["Percentage", "Profit and Loss"]
+    assert rows[0]["book_key"] == "rs_aggarwal" and rows[0]["subject"] == "Arithmetic"
+    assert run(sqlite_db.list_chapters(2)) == []

@@ -37,6 +37,8 @@ class Saved:
     read: PageRead
     needs_answer: bool
     duplicate: bool = False
+    chapters_saved: int = 0  # index pages: chapters read, so an album can report one total
+    book_title: str = ""
 
 
 def new_batch_id() -> str:
@@ -151,10 +153,12 @@ async def save_photo(
     indexed = await _safe_index(client, user_id, "page", page_id,
                                 retrieval.chunk_text(read.text), subject, topic, batch_id)
 
+    chapters_saved = 0
     if read.kind == "cover":
         summary = _cover_summary(read)
     elif read.kind == "index":
         summary = await _save_index(client, user_id, book_id, read, batch_id)
+        chapters_saved = len(read.chapters)
     elif read.kind == "pyq":
         summary, topic = await _save_pyqs(client, user_id, book_id, chapter_id, page_id, read, topic, batch_id)
     elif read.kind == "content":
@@ -163,12 +167,14 @@ async def save_photo(
         summary = ""
     if summary and not indexed:
         summary += " (Search index missed this one — it's saved, just not searchable.)"
-    return Saved(read.kind, page_id, chapter_id, topic, summary, read, wants_answer)
+    title = syllabus.book_title(read.book) if read.book else f"your {read.subject} book"
+    return Saved(read.kind, page_id, chapter_id, topic, summary, read, wants_answer,
+                 chapters_saved=chapters_saved, book_title=title)
 
 
 def _cover_summary(read: PageRead) -> str:
     if read.book:
-        return f"📘 {syllabus.book_title(read.book)}. Send the index pages next."
+        return f"📘 {syllabus.book_title(read.book)}."
     return f"📘 Saved the cover (filed under {read.subject})."
 
 
@@ -282,8 +288,9 @@ async def grounded_prompt(
     if not hits:
         return question, []
     prompt = (
-        "Material from the user's own books and saved PYQs. Use it when it is relevant, "
-        "cite it as [n], and ignore it when it is not:\n\n"
+        "Material from the user's own books and saved PYQs. Use it when it is relevant and "
+        "ignore it when it is not. Do not write [n] reference markers; if you rely on it, "
+        "name the source in plain words (e.g. \"Karim, The Mauryan Age\").\n\n"
         f"{retrieval.render_context(hits)}\n\nThe user's message:\n{question}"
     )
     return prompt, hits
