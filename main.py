@@ -1,9 +1,8 @@
-"""Telegram entry point: TSLPRB (PC/SI) exam-prep bot with a built-in solver.
+"""Telegram entry point: TSLPRB (PC/SI) exam-prep bot with no commands.
 
-Two modes share one bot:
-  * Solver    - send a question or a photo of one, get a structured answer.
-  * Exam prep - photograph book pages to build a personal MCQ bank, then drill
-                it with spaced repetition, scoring and a daily quiz.
+Every photo is read, filed (book, chapter, PYQs, notes) and indexed for search;
+every text message is routed by intent (study plan, question lookup, search,
+quiz, stats, daily quiz, or a grounded answer).
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, AsyncIterator
 
 from PIL import Image, UnidentifiedImageError
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
@@ -33,8 +32,11 @@ from telegram.ext import (
 )
 
 import db
-import mcq
+import library
 import quiz
+import ranking
+import retrieval
+import router
 from ai_client import AIError, NebiusClient
 from config import (
     HISTORY_TURNS,
@@ -46,7 +48,6 @@ from config import (
     PORT,
     TELEGRAM_BOT_TOKEN,
 )
-from exam_prompts import SUBJECTS
 from formatter import escape_markdown_v2, prepare_for_telegram, unescape_markdown_v2
 from prompts import IMAGE_DEFAULT_PROMPT
 
@@ -60,57 +61,36 @@ logger = logging.getLogger("exam-bot")
 
 AI_CLIENT_KEY = "ai_client"
 HISTORY_KEY = "history"
-ADD_MODE_KEY = "add_mode"
 
 MAX_PROMPT_CHARS = 4000
 MAX_IMAGE_DIMENSION = 1600
 MAX_IMAGE_BYTES = 3 * 1024 * 1024
 MIN_JPEG_QUALITY = 55
-ADD_MODE_TIMEOUT_SECONDS = 15 * 60
-QUESTIONS_PER_PAGE = 8
 DEFAULT_QUIZ_LENGTH = 10
-MAX_QUIZ_LENGTH = 50
 # Album photos arrive as separate updates a few hundred ms apart; wait this long
 # after the last one before treating the album as complete.
 ALBUM_SETTLE_SECONDS = 1.5
-ALBUM_DEFAULT_PROMPT = "Solve or explain what is in these images."
 
 # (chat_id, media_group_id) -> {"messages": [...], "last": monotonic time}
 _pending_albums: dict[tuple[int, str], dict[str, Any]] = {}
 
 GENERIC_ERROR = "Something went wrong. Please try again."
-EMPTY_TEXT_REPLY = "Send me a question, or a photo of one. /help shows everything."
+EMPTY_TEXT_REPLY = "Send me a question, or a photo of your book pages."
 DOWNLOAD_ERROR = "I couldn't download that image from Telegram. Please try sending it again."
 IMAGE_DECODE_ERROR = "I couldn't read that image. Try a clearer photo (JPEG or PNG)."
 
 WELCOME = (
     "🎯 *TSLPRB Prep Bot*\n\n"
-    "*Two things I do*\n\n"
-    "1\\. *Solve* — send any question, or a photo of one, and I'll work it out\\.\n\n"
-    "2\\. *Drill* — photograph a page from your books and I'll turn it into exam MCQs "
-    "you can practise, with spaced repetition\\.\n\n"
-    "*Start here*\n"
-    "• /add — then photograph a page of Laxmikanth, Karim, R\\.S\\. Aggarwal, anything\n"
-    "• /quiz — practise what you've added\n"
-    "• /stats — see where you stand\n\n"
-    "Questions come from *your* page only — I don't add facts from memory\\."
-)
-
-HELP_EXTRA = (
-    "\n\n*All commands*\n"
-    "• `/add [subject]` — next photos become questions\n"
-    "• `/done` — stop adding\n"
-    "• `/quiz [subject] [count]` — e\\.g\\. `/quiz polity 15`\n"
-    "• `/stats` — accuracy overall and per subject\n"
-    "• `/weak` — your worst topics\n"
-    "• `/daily 6` — quiz every day at 6 AM \\(IST\\)\n"
-    "• `/nodaily` — cancel it\n"
-    "• `/bank` — how many questions you have\n"
-    "• `/reset` — clear solver memory\n\n"
-    "*Tips*\n"
-    "• Good light and a flat page give better questions\n"
-    "• One page at a time beats a whole spread\n"
-    "• Wrong answers come back sooner, correct ones drift further out"
+    "No commands — just send photos and ask\\.\n\n"
+    "📷 *Photos* of your index pages, PYQ pages, notes or a question — "
+    "I file every one by book, chapter and topic\\.\n\n"
+    "*Then ask things like*\n"
+    "• what should I study?\n"
+    "• help with Q14\n"
+    "• PYQs on Ashoka\n"
+    "• quiz me on polity\n"
+    "• how am I doing?\n"
+    "• daily quiz at 6am"
 )
 
 
@@ -172,13 +152,6 @@ async def _reply_md(message, text: str, **kwargs) -> None:
         await message.reply_text(
             unescape_markdown_v2(text), disable_web_page_preview=True, **kwargs
         )
-
-
-async def _send_answer(update: Update, answer: str) -> None:
-    message = update.effective_message
-    if message is None:
-        return
-    await _send_answer_to(message, answer)
 
 
 async def _send_answer_to(message, answer: str) -> None:
@@ -270,156 +243,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply_md(update.effective_message, WELCOME)
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_message:
-        await _reply_md(update.effective_message, WELCOME + HELP_EXTRA)
-
-
-async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.chat_data is not None:
-        context.chat_data.pop(HISTORY_KEY, None)
-    if update.effective_message:
-        await update.effective_message.reply_text("Solver memory cleared.")
-
-
-# ------------------------------------------------------------- adding questions
-
-
-async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Put the chat into add mode: the next photos become question sources."""
-    message = update.effective_message
-    if message is None or context.chat_data is None:
-        return
-    hint = " ".join(context.args or "").strip()
-    context.chat_data[ADD_MODE_KEY] = {"hint": hint, "until": time.time() + ADD_MODE_TIMEOUT_SECONDS}
-
-    subject_line = f"Subject hint: {hint}\n\n" if hint else ""
-    await message.reply_text(
-        f"📷 Add mode on.\n\n{subject_line}"
-        "Photograph a page from your book and send it. I'll read it and write exam MCQs "
-        "from what's printed on that page — nothing from my own memory.\n\n"
-        "Send as many pages as you like. /done when finished.\n"
-        f"(Turns off by itself after {ADD_MODE_TIMEOUT_SECONDS // 60} minutes.)"
-    )
-
-
-async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.chat_data is not None:
-        context.chat_data.pop(ADD_MODE_KEY, None)
-    if update.effective_message:
-        await update.effective_message.reply_text("Add mode off. /quiz when you're ready.")
-
-
-def _add_mode(context: ContextTypes.DEFAULT_TYPE) -> dict | None:
-    if context.chat_data is None:
-        return None
-    mode = context.chat_data.get(ADD_MODE_KEY)
-    if not isinstance(mode, dict):
-        return None
-    if mode.get("until", 0) < time.time():
-        context.chat_data.pop(ADD_MODE_KEY, None)
-        return None
-    return mode
-
-
-async def _handle_page_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: dict) -> None:
-    """Turn a photographed book page into stored MCQs."""
-    message = update.effective_message
-    user = update.effective_user
-    if message is None or user is None:
-        return
-
-    hint = (message.caption or "").strip() or mode.get("hint", "")
-
-    async with typing(context, message.chat_id):
-        image_bytes = await _download_photo(message, context)
-        if image_bytes is None:
-            return
-        try:
-            questions, note = await mcq.generate_from_image(
-                _client(context), image_bytes, count=QUESTIONS_PER_PAGE, hint=hint
-            )
-        except (AIError, mcq.MCQError) as exc:
-            detail = getattr(exc, "user_message", str(exc))
-            logger.error("MCQ generation failed: %s", getattr(exc, "detail", exc))
-            await message.reply_text(f"Couldn't make questions from that page. {detail}")
-            return
-
-        if not questions:
-            reason = note or "I couldn't find examinable content on that page."
-            await message.reply_text(f"No questions added. {reason}\n\nTry a clearer, flatter photo.")
-            return
-
-        added = await db.add_questions(user.id, questions, source=hint or "book page")
-
-    skipped = len(questions) - added
-    subjects = sorted({q["subject"] for q in questions})
-    topics = sorted({q["topic"] for q in questions})
-
-    lines = [f"✅ Added {added} question{'s' if added != 1 else ''}."]
-    if skipped:
-        lines.append(f"({skipped} were duplicates of ones you already have.)")
-    lines.append("")
-    lines.append(f"Subject: {', '.join(subjects)}")
-    lines.append(f"Topics: {', '.join(topics[:6])}")
-    if note:
-        lines.append(f"\nNote: {note}")
-    lines.append("\nSend the next page, or /quiz to start drilling.")
-    await message.reply_text("\n".join(lines))
-
-
-# --------------------------------------------------------------- solver handlers
-
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    if message is None or message.chat is None:
-        return
-
-    user_text = (message.text or "").strip()
-    if not user_text:
-        await message.reply_text(EMPTY_TEXT_REPLY)
-        return
-    if len(user_text) > MAX_PROMPT_CHARS:
-        user_text = user_text[:MAX_PROMPT_CHARS]
-        logger.info("Truncated an over-long prompt from chat %s", message.chat_id)
-
-    logger.info("Text question from chat %s (%d chars)", message.chat_id, len(user_text))
-    try:
-        async with typing(context, message.chat_id):
-            answer = await _client(context).ask_text(user_text, history=_history(context))
-    except AIError as exc:
-        logger.error("AI error on text request: %s", exc.detail)
-        await message.reply_text(exc.user_message)
-        return
-
-    _remember(context, user_text, answer)
-    await _send_answer(update, answer)
+# ---------------------------------------------------------------- photo handling
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Add mode turns pages into questions; otherwise solve what is in the photo."""
+    """Every photo is stored and indexed; questions on it get answered."""
     message = update.effective_message
     if message is None or not message.photo:
         return
-
-    mode = _add_mode(context)
-    if mode is not None:
-        await _handle_page_photo(update, context, mode)
-        return
-
     if message.media_group_id:
         _queue_album_photo(message, context)
         return
-
-    await _solve_photos(context, [message])
+    await _process_photos(context, [message])
 
 
 def _queue_album_photo(message, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Hold an album photo until the rest of the album has arrived.
 
     Telegram delivers an album as separate messages sharing a media_group_id,
-    with the caption on only one of them. Answering each on its own gives one
+    with the caption on only one of them. Handling each on its own gives one
     reply per photo, most of them without the user's question.
     """
     key = (message.chat_id, message.media_group_id)
@@ -432,83 +274,333 @@ def _queue_album_photo(message, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _flush_album(key: tuple[int, str], context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Wait for the album to go quiet, then answer every photo in one go."""
+    """Wait for the album to go quiet, then process every photo in it together."""
     while True:
         delay = _pending_albums[key]["last"] + ALBUM_SETTLE_SECONDS - time.monotonic()
         if delay <= 0:
             break
         await asyncio.sleep(delay)
     album = _pending_albums.pop(key)
-    messages = sorted(album["messages"], key=lambda m: m.message_id)
-    await _solve_photos(context, messages)
+    await _process_photos(context, sorted(album["messages"], key=lambda m: m.message_id))
 
 
-async def _solve_photos(context: ContextTypes.DEFAULT_TYPE, messages: list) -> None:
-    """Answer one photo, or a whole album, with a single model call."""
+async def _save_photo_message(context, message, user_id: int, caption: str, batch_id: str):
+    image = await _download_photo(message, context)
+    if image is None:
+        return None
+    photo = message.photo[-1]
+    try:
+        saved = await library.save_photo(
+            _client(context), user_id, image, photo.file_id, photo.file_unique_id,
+            caption=caption, batch_id=batch_id,
+        )
+    except AIError as exc:
+        logger.error("Saving a photo failed: %s", exc.detail)
+        await message.reply_text(exc.user_message)
+        return None
+    return saved, image
+
+
+async def _process_photos(context: ContextTypes.DEFAULT_TYPE, messages: list) -> None:
+    """Save every photo (one batch), report what was filed, then answer if asked."""
     captioned = [m for m in messages if (m.caption or "").strip()]
     anchor = captioned[0] if captioned else messages[0]
-    caption = (anchor.caption or "").strip()
-    count = len(messages)
-
-    prompt = caption or (IMAGE_DEFAULT_PROMPT if count == 1 else ALBUM_DEFAULT_PROMPT)
-    if len(prompt) > MAX_PROMPT_CHARS:
-        prompt = prompt[:MAX_PROMPT_CHARS]
-    if count > 1:
-        prompt = (
-            f"The user sent these {count} photos together as one message. Read them as one "
-            f"set and give one answer.\n\n{prompt}"
-        )
-
-    logger.info("Photo question from chat %s (%d image(s))", anchor.chat_id, count)
-    try:
-        async with typing(context, anchor.chat_id):
-            downloaded = await asyncio.gather(*(_download_photo(m, context) for m in messages))
-            images = [img for img in downloaded if img is not None]
-            if not images:
-                return
-            answer = await _client(context).ask_image(
-                prompt, images, "image/jpeg", history=_history(context)
-            )
-    except AIError as exc:
-        logger.error("AI error on image request: %s", exc.detail)
-        await anchor.reply_text(exc.user_message)
+    caption = (anchor.caption or "").strip()[:MAX_PROMPT_CHARS]
+    user = anchor.from_user
+    if user is None or context.chat_data is None:
         return
 
-    label = "[image]" if count == 1 else f"[{count} images]"
-    _remember(context, f"{label} {caption or prompt}", answer)
-    await _send_answer_to(anchor, answer)
+    batch_id = library.new_batch_id()
+    logger.info("Saving %d photo(s) from chat %s", len(messages), anchor.chat_id)
+    async with typing(context, anchor.chat_id):
+        results = await asyncio.gather(
+            *(_save_photo_message(context, m, user.id, caption, batch_id) for m in messages)
+        )
+    done = [r for r in results if r is not None]
+    if not done:
+        return
+    for saved, _ in done:
+        library.focus_from_saved(context.chat_data, saved)
+    await _reply_saved(anchor, done, batch_id)
+
+    if caption:
+        focus = library.get_focus(context.chat_data)
+        intent = router.quick_intent(caption) or await router.classify_text(
+            _client(context), caption, library.focus_summary(focus)
+        )
+        if intent.name != "solve":
+            await _TEXT_ROUTES[intent.name](anchor, context, user.id, caption, intent, focus)
+            return
+        to_answer = done
+    else:
+        to_answer = [(s, img) for s, img in done if s.needs_answer]
+    if not to_answer:
+        return
+
+    question = caption or IMAGE_DEFAULT_PROMPT
+    page_text = "\n\n".join(s.read.text for s, _ in to_answer if s.read.text)[:3000]
+    if page_text:
+        question += f"\n\nText read from the photo(s):\n{page_text}"
+    await _grounded_answer(
+        anchor, context, user.id, question,
+        remember_as=f"[photo] {caption or 'solve this'}",
+        images=[img for _, img in to_answer],
+    )
+
+
+def _undo_button(batch_id: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton("↩️ Undo", callback_data=f"u:{batch_id}")
+
+
+def _kind_keyboard(batch_id: str, page_id: int) -> InlineKeyboardMarkup:
+    kinds = ("index", "pyq", "content", "question", "cover", "other")
+    buttons = [
+        InlineKeyboardButton(
+            library.KIND_LABELS[k].capitalize(), callback_data=f"k:{batch_id}:{page_id}:{k}"
+        )
+        for k in kinds
+    ]
+    return InlineKeyboardMarkup([buttons[:3], buttons[3:], [_undo_button(batch_id)]])
+
+
+async def _reply_saved(anchor, done: list, batch_id: str) -> None:
+    lines = [saved.summary for saved, _ in done if saved.summary]
+    if not lines:
+        return
+    fresh = [saved for saved, _ in done if saved.page_id is not None]
+    if not fresh:
+        await anchor.reply_text("\n".join(lines))
+        return
+    single = fresh[0] if len(done) == 1 else None
+    if single is not None and single.read.confidence < router.LOW_CONFIDENCE:
+        lines.append(f"\nNot sure this is a {library.KIND_LABELS[single.kind]} page — what is it?")
+        markup = _kind_keyboard(batch_id, single.page_id)
+    elif single is not None:
+        markup = InlineKeyboardMarkup([[
+            _undo_button(batch_id),
+            InlineKeyboardButton("🔁 Wrong type", callback_data=f"w:{batch_id}:{single.page_id}"),
+        ]])
+    else:
+        markup = InlineKeyboardMarkup([[_undo_button(batch_id)]])
+    await anchor.reply_text("\n".join(lines), reply_markup=markup)
+
+
+async def _grounded_answer(
+    message, context, user_id: int, question: str, remember_as: str, images: list | None = None
+) -> None:
+    """Answer with the user's own saved material retrieved into the prompt."""
+    client = _client(context)
+    focus = library.get_focus(context.chat_data)
+    try:
+        async with typing(context, message.chat_id):
+            prompt, hits = await library.grounded_prompt(client, user_id, question, focus)
+            if images:
+                answer = await client.ask_image(prompt, images, "image/jpeg", history=_history(context))
+            else:
+                answer = await client.ask_text(prompt, history=_history(context))
+    except AIError as exc:
+        logger.error("AI error on answer: %s", exc.detail)
+        await message.reply_text(exc.user_message)
+        return
+    _remember(context, remember_as, answer)
+    await _send_answer_to(message, answer + library.render_similar(hits, exclude=question))
+
+
+async def on_library_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Undo a save, show the kind picker, or re-read a photo as a chosen kind."""
+    query, user = update.callback_query, update.effective_user
+    if query is None or user is None:
+        return
+    parts = (query.data or "").split(":")
+
+    if parts[0] == "u" and len(parts) == 2:
+        removed = await db.undo_batch(user.id, parts[1])
+        await query.answer("Undone." if removed else "Nothing left to undo.")
+        text = (query.message.text if query.message else "") or ""
+        with contextlib.suppress(TelegramError):
+            await query.edit_message_text(f"{text}\n\n↩️ Undone.", reply_markup=None)
+        return
+
+    if parts[0] == "w" and len(parts) == 3 and parts[2].isdigit():
+        await query.answer()
+        with contextlib.suppress(TelegramError):
+            await query.edit_message_reply_markup(_kind_keyboard(parts[1], int(parts[2])))
+        return
+
+    if parts[0] == "k" and len(parts) == 4 and parts[2].isdigit() and parts[3] in router.PAGE_KINDS:
+        await _reread_as(query, context, user.id, parts[1], int(parts[2]), parts[3])
+        return
+
+    await query.answer()
+
+
+async def _reread_as(query, context, user_id: int, batch_id: str, page_id: int, kind: str) -> None:
+    page = await db.get_page(user_id, page_id)
+    if page is None:
+        await query.answer("That photo was already removed.", show_alert=True)
+        return
+    await query.answer(f"Re-reading as {library.KIND_LABELS[kind]}…")
+    try:
+        telegram_file = await context.bot.get_file(page["file_id"])
+        raw = bytes(await telegram_file.download_as_bytearray())
+        image, _ = await asyncio.to_thread(_compress_image, raw)
+    except (TelegramError, UnidentifiedImageError, OSError, ValueError) as exc:
+        logger.error("Re-download failed: %s", exc)
+        if query.message is not None:
+            await query.message.reply_text(DOWNLOAD_ERROR)
+        return
+
+    await db.undo_batch(user_id, batch_id)
+    new_batch = library.new_batch_id()
+    try:
+        saved = await library.save_photo(
+            _client(context), user_id, image, page["file_id"], page["file_unique_id"],
+            forced_kind=kind, batch_id=new_batch,
+        )
+    except AIError as exc:
+        logger.error("Re-read failed: %s", exc.detail)
+        if query.message is not None:
+            await query.message.reply_text(exc.user_message)
+        return
+    library.focus_from_saved(context.chat_data, saved)
+    text = saved.summary or f"Saved as a {library.KIND_LABELS[kind]}."
+    with contextlib.suppress(TelegramError):
+        await query.edit_message_text(
+            text, reply_markup=InlineKeyboardMarkup([[_undo_button(new_batch)]])
+        )
+    if saved.needs_answer and query.message is not None:
+        await _grounded_answer(
+            query.message, context, user_id,
+            f"{IMAGE_DEFAULT_PROMPT}\n\nText read from the photo:\n{saved.read.text[:3000]}",
+            remember_as="[photo] solve this", images=[image],
+        )
+
+
+# ----------------------------------------------------------------- text routing
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message, user = update.effective_message, update.effective_user
+    if message is None or user is None or context.chat_data is None:
+        return
+    user_text = (message.text or "").strip()
+    if not user_text:
+        await message.reply_text(EMPTY_TEXT_REPLY)
+        return
+    user_text = user_text[:MAX_PROMPT_CHARS]
+
+    focus = library.get_focus(context.chat_data)
+    intent = router.quick_intent(user_text)
+    if intent is None:
+        async with typing(context, message.chat_id):
+            intent = await router.classify_text(_client(context), user_text, library.focus_summary(focus))
+    logger.info("Text from chat %s routed to %s", message.chat_id, intent.name)
+    await _TEXT_ROUTES.get(intent.name, _route_solve)(message, context, user.id, user_text, intent, focus)
+
+
+async def _route_solve(message, context, user_id, text, intent, focus) -> None:
+    await _grounded_answer(message, context, user_id, text, remember_as=text)
+
+
+async def _route_study_plan(message, context, user_id, text, intent, focus) -> None:
+    units = ranking.build_units(await db.pyq_counts(user_id), await db.topic_progress(user_id))
+    await message.reply_text(ranking.render_plan(units))
+
+
+async def _route_lookup(message, context, user_id, text, intent, focus) -> None:
+    if intent.number is None:
+        page = await db.get_page(user_id, focus["page_id"]) if focus.get("page_id") else None
+        if page is None:
+            await _route_solve(message, context, user_id, text, intent, focus)
+            return
+        question = f"{text}\n\nThe page the user means:\n{page['text']}"
+    else:
+        pyq = await library.lookup_pyq(user_id, intent.number, focus)
+        if pyq is None:
+            await message.reply_text(
+                f"I don't have Q{intent.number} saved yet. Send a photo of that page and ask again."
+            )
+            return
+        library.set_focus(context.chat_data, chapter_id=pyq.get("chapter_id"),
+                          page_id=pyq.get("page_id"), topic=pyq.get("topic"))
+        question = f"{library.render_pyq(pyq)}\n\n{text}"
+    await _grounded_answer(message, context, user_id, question, remember_as=text)
+
+
+async def _route_search(message, context, user_id, text, intent, focus) -> None:
+    client = _client(context)
+    async with typing(context, message.chat_id):
+        hits = await retrieval.search(client, user_id, intent.query or text, k=8)
+    if not hits:
+        await message.reply_text("Nothing about that in what you've saved yet.")
+        return
+    prompt = (
+        "Answer using ONLY the material below from the user's saved pages and PYQs. "
+        "List any matching PYQs with their exam and year. Cite as [n].\n\n"
+        f"{retrieval.render_context(hits)}\n\nThe user's request:\n{text}"
+    )
+    try:
+        async with typing(context, message.chat_id):
+            answer = await client.ask_text(prompt, history=_history(context))
+    except AIError as exc:
+        logger.error("AI error on search: %s", exc.detail)
+        await message.reply_text(exc.user_message)
+        return
+    _remember(context, text, answer)
+    await _send_answer_to(message, answer)
+
+
+async def _route_quiz(message, context, user_id, text, intent, focus) -> None:
+    questions = await db.pick_quiz(user_id, DEFAULT_QUIZ_LENGTH, intent.subject)
+    if not questions:
+        where = f" in {intent.subject}" if intent.subject else ""
+        await message.reply_text(
+            f"No practice questions{where} yet. Send photos of your notes pages and I'll make some."
+        )
+        return
+    session = quiz.start_session(context.chat_data, questions, intent.subject)
+    await _send_current_question(message, session)
+
+
+async def _route_stats(message, context, user_id, text, intent, focus) -> None:
+    await _reply_md(message, quiz.render_stats(await db.stats(user_id)))
+    weak = await db.weak_topics(user_id)
+    if weak:
+        await _reply_md(message, quiz.render_weak(weak))
+
+
+async def _route_daily(message, context, user_id, text, intent, focus) -> None:
+    if intent.hour is None:
+        await message.reply_text("What time? For example: “daily quiz at 6am”.")
+        return
+    await db.set_daily(user_id, message.chat_id, intent.hour, DEFAULT_QUIZ_LENGTH)
+    _schedule_daily(context.application, user_id, message.chat_id, intent.hour, DEFAULT_QUIZ_LENGTH)
+    await message.reply_text(
+        f"⏰ Daily quiz set: {DEFAULT_QUIZ_LENGTH} questions at {intent.hour:02d}:00 IST. "
+        "Say “stop daily quiz” to cancel."
+    )
+
+
+async def _route_daily_off(message, context, user_id, text, intent, focus) -> None:
+    await db.set_daily(user_id, message.chat_id, None)
+    for job in context.application.job_queue.get_jobs_by_name(f"daily-{user_id}"):
+        job.schedule_removal()
+    await message.reply_text("Daily quiz cancelled.")
+
+
+_TEXT_ROUTES = {
+    "solve": _route_solve,
+    "study_plan": _route_study_plan,
+    "lookup": _route_lookup,
+    "search": _route_search,
+    "quiz": _route_quiz,
+    "stats": _route_stats,
+    "daily": _route_daily,
+    "daily_off": _route_daily_off,
+}
 
 
 # ------------------------------------------------------------------ quiz flow
-
-
-async def quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    user = update.effective_user
-    if message is None or user is None or context.chat_data is None:
-        return
-
-    subject: str | None = None
-    count = DEFAULT_QUIZ_LENGTH
-    for arg in context.args or []:
-        if arg.isdigit():
-            count = max(1, min(MAX_QUIZ_LENGTH, int(arg)))
-        else:
-            match = next((s for s in SUBJECTS if s.lower() == arg.lower()), None)
-            if match:
-                subject = match
-
-    questions = await db.pick_quiz(user.id, count, subject)
-    if not questions:
-        where = f" in {subject}" if subject else ""
-        await message.reply_text(
-            f"No questions{where} yet.\n\n"
-            "Use /add and photograph a page from your book to build your bank."
-        )
-        return
-
-    session = quiz.start_session(context.chat_data, questions, subject)
-    await _send_current_question(message, session)
 
 
 async def _send_current_question(message, session: dict) -> None:
@@ -537,7 +629,7 @@ async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     session = quiz.get_session(context.chat_data)
     if session is None or session["token"] != token:
-        await query.answer("That quiz has ended. Send /quiz to start a new one.", show_alert=True)
+        await query.answer("That quiz has ended. Say “quiz me” to start a new one.", show_alert=True)
         with contextlib.suppress(TelegramError):
             await query.edit_message_reply_markup(reply_markup=None)
         return
@@ -583,34 +675,6 @@ async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         summary = quiz.render_summary(session)
         quiz.end_session(context.chat_data)
         await _reply_md(message, summary)
-
-
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message, user = update.effective_message, update.effective_user
-    if message is None or user is None:
-        return
-    await _reply_md(message, quiz.render_stats(await db.stats(user.id)))
-
-
-async def weak_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message, user = update.effective_message, update.effective_user
-    if message is None or user is None:
-        return
-    await _reply_md(message, quiz.render_weak(await db.weak_topics(user.id)))
-
-
-async def bank_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message, user = update.effective_message, update.effective_user
-    if message is None or user is None:
-        return
-    rows = await db.count_questions(user.id)
-    if not rows:
-        await message.reply_text("Your question bank is empty. Use /add to fill it.")
-        return
-    total = sum(row["n"] for row in rows)
-    lines = [f"📚 {total} questions in your bank", ""]
-    lines.extend(f"{row['subject']:<14} {row['n']}" for row in rows)
-    await message.reply_text("\n".join(lines))
 
 
 # ------------------------------------------------------------------ daily quiz
@@ -660,41 +724,6 @@ def _schedule_daily(application: Application, user_id: int, chat_id: int, hour: 
         name=name,
         data={"user_id": user_id, "chat_id": chat_id, "count": count},
     )
-
-
-async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message, user = update.effective_message, update.effective_user
-    if message is None or user is None:
-        return
-
-    args = context.args or []
-    if not args or not args[0].isdigit() or not 0 <= int(args[0]) <= 23:
-        await message.reply_text(
-            "Give me an hour in 24h IST.\n\n"
-            "  /daily 6      → 10 questions every day at 6 AM\n"
-            "  /daily 21 20  → 20 questions every day at 9 PM"
-        )
-        return
-
-    hour = int(args[0])
-    count = max(1, min(MAX_QUIZ_LENGTH, int(args[1]))) if len(args) > 1 and args[1].isdigit() else DEFAULT_QUIZ_LENGTH
-
-    await db.set_daily(user.id, message.chat_id, hour, count)
-    _schedule_daily(context.application, user.id, message.chat_id, hour, count)
-    await message.reply_text(
-        f"⏰ Daily quiz set: {count} questions at {hour:02d}:00 IST.\n"
-        "Cancel any time with /nodaily."
-    )
-
-
-async def nodaily_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message, user = update.effective_message, update.effective_user
-    if message is None or user is None:
-        return
-    await db.set_daily(user.id, message.chat_id, None)
-    for job in context.application.job_queue.get_jobs_by_name(f"daily-{user.id}"):
-        job.schedule_removal()
-    await message.reply_text("Daily quiz cancelled.")
 
 
 # ------------------------------------------------------------------- lifecycle
@@ -749,17 +778,8 @@ def build_application() -> Application:
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("reset", reset))
-    application.add_handler(CommandHandler("add", add_command))
-    application.add_handler(CommandHandler("done", done_command))
-    application.add_handler(CommandHandler("quiz", quiz_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("weak", weak_command))
-    application.add_handler(CommandHandler("bank", bank_command))
-    application.add_handler(CommandHandler("daily", daily_command))
-    application.add_handler(CommandHandler("nodaily", nodaily_command))
     application.add_handler(CallbackQueryHandler(on_answer, pattern=r"^q:"))
+    application.add_handler(CallbackQueryHandler(on_library_button, pattern=r"^[uwk]:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_error_handler(on_error)

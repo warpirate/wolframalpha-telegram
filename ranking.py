@@ -103,7 +103,7 @@ def render_plan(units: list[Unit], exam: str = "SI") -> str:
 
     if total < syllabus.MIN_PYQS_FOR_REAL_WEIGHTS:
         lines.append(
-            f"Only {total} PYQs saved so far, so this is an estimate until about "
+            f"Only {total} PYQ{'s' if total != 1 else ''} saved so far, so this is an estimate until about "
             f"{syllabus.MIN_PYQS_FOR_REAL_WEIGHTS} are in."
         )
         lines.append("")

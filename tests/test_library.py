@@ -78,3 +78,13 @@ def test_render_pyq():
                                "options": ["A", "B"], "answer": "a"})
     assert text.splitlines()[0] == "SI 2019 · Q14"
     assert "(a) A" in text and "(b) B" in text
+
+
+def test_render_similar_skips_the_question_being_asked():
+    hits = [
+        {"source": "pyq", "score": 0.9, "text": "Which Mauryan king issued the Dhamma edicts? Ashoka"},
+        {"source": "pyq", "score": 0.8, "text": "Who was Ashoka's father? Bindusara"},
+        {"source": "page", "score": 0.9, "text": "Ashoka's Dhamma was..."},
+    ]
+    text = library.render_similar(hits, exclude="SI 2019 · Q14\nWhich Mauryan king issued the Dhamma edicts?")
+    assert "father" in text and "edicts" not in text

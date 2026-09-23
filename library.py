@@ -191,7 +191,8 @@ async def _save_index(client, user_id, book_id, read: PageRead, batch_id) -> str
     more = "…" if len(read.chapters) > 3 else ""
     updated = len(read.chapters) - added
     tail = f" ({updated} already known, updated)" if updated else ""
-    return f"🗂 Saved {len(read.chapters)} chapters of {title}: {names}{more}{tail}"
+    count = len(read.chapters)
+    return f"🗂 Saved {count} chapter{'s' if count != 1 else ''} of {title}: {names}{more}{tail}"
 
 
 async def _save_pyqs(client, user_id, book_id, chapter_id, page_id, read: PageRead, topic, batch_id):
@@ -288,8 +289,12 @@ async def grounded_prompt(
     return prompt, hits
 
 
-def render_similar(hits: list[dict], limit: int = 3) -> str:
-    pyqs = [h for h in hits if h["source"] == "pyq" and h["score"] >= 0.6][:limit]
+def render_similar(hits: list[dict], exclude: str = "", limit: int = 3) -> str:
+    """Nearby PYQs, leaving out the one the user is already asking about."""
+    pyqs = [
+        h for h in hits
+        if h["source"] == "pyq" and h["score"] >= 0.6 and h["text"][:40] not in exclude
+    ][:limit]
     if not pyqs:
         return ""
     lines = ["", "", "Asked before:"]

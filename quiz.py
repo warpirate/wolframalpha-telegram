@@ -136,7 +136,7 @@ def render_summary(session: dict) -> str:
         lines.extend(
             escape_markdown_v2(f"• {topic} ({n})") for topic, n in ranked[:5]
         )
-    lines.extend(["", escape_markdown_v2("Wrong answers come back sooner. /quiz for more.")])
+    lines.extend(["", escape_markdown_v2("Wrong answers come back sooner. Say “quiz me” for more.")])
     return "\n".join(lines)
 
 
@@ -147,7 +147,7 @@ def _mmss(seconds: int) -> str:
 def render_stats(data: dict) -> str:
     if data["total"] == 0:
         return escape_markdown_v2(
-            "No attempts yet. Add questions with /add, then run /quiz."
+            "No attempts yet. Send photos of your notes pages, then say “quiz me”."
         )
     pct = round(100 * data["correct"] / data["total"])
     lines = [
@@ -190,5 +190,5 @@ def render_weak(rows: list[dict]) -> str:
         lines.append(
             escape_markdown_v2(f"{pct:>3}%  {row['name']} ({row['subject']}) — {row['ok']}/{row['n']}")
         )
-    lines.extend(["", escape_markdown_v2("Drill one with: /quiz <subject>")])
+    lines.extend(["", escape_markdown_v2("Drill one by saying “quiz me on <subject>”.")])
     return "\n".join(lines)
