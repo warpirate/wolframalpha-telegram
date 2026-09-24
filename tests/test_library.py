@@ -105,3 +105,16 @@ def test_album_reply_merges_index_pages_and_puts_cover_first():
                                saved("cover", "📘 R.S. Aggarwal.")])
     assert lines == ["📘 R.S. Aggarwal.", "🗂 Saved 39 chapters of R.S. Aggarwal."]
     assert main._saved_lines([saved("cover", "📘 R.S. Aggarwal.")])[-1] == "Send the index pages next."
+
+
+def test_grounded_prompt_flags_answers_with_nothing_saved(monkeypatch):
+    import retrieval
+
+    async def no_hits(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(retrieval, "search", no_hits)
+    prompt, hits = run(library.grounded_prompt(None, 1, "Who was Ashoka's father?", {}))
+    assert hits == []
+    assert library.UNVERIFIED_LINE in prompt
+    assert prompt.endswith("Who was Ashoka's father?")

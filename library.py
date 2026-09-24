@@ -279,6 +279,18 @@ def render_pyq(pyq: dict) -> str:
     return "\n".join(lines)
 
 
+UNVERIFIED_LINE = "⚠️ Not from your saved pages — check it in your book."
+
+
+# Nothing saved matched, so the answer comes from the model alone. Say so, because
+# a confident answer from memory is exactly what the saved pages are there to check.
+UNGROUNDED_NOTE = (
+    "None of the user's saved pages or PYQs match this message. If it is an exam "
+    "question, answer it and end with this line exactly: "
+    f"\"{UNVERIFIED_LINE}\". If it is casual chat, just reply normally without that line."
+)
+
+
 async def grounded_prompt(
     client: NebiusClient, user_id: int, question: str, focus: dict
 ) -> tuple[str, list[dict]]:
@@ -286,7 +298,7 @@ async def grounded_prompt(
     query = f"{question}\n{focus.get('topic', '')}".strip()
     hits = await retrieval.search(client, user_id, query)
     if not hits:
-        return question, []
+        return f"{UNGROUNDED_NOTE}\n\nThe user's message:\n{question}", []
     prompt = (
         "Material from the user's own books and saved PYQs. Use it when it is relevant and "
         "ignore it when it is not. Do not write [n] reference markers; if you rely on it, "
