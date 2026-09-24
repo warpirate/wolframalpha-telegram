@@ -23,6 +23,20 @@ _QUESTION_NUMBER = re.compile(
     re.I,
 )
 
+# Whole-message phrasings common enough to route without a model call. Anything
+# longer or different still goes to classify_text, so these stay strict.
+_POLITE = r"(?:\s*(?:please|pls|plz))?[\s?.!]*$"
+_FIXED_INTENTS = [
+    ("study_plan", re.compile(
+        r"^\s*(?:what\s+(?:should|do)\s+i\s+(?:study|read)(?:\s+(?:next|now|today))?"
+        r"|(?:my\s+|a\s+)?study\s+plan)" + _POLITE, re.I)),
+    ("stats", re.compile(
+        r"^\s*(?:how\s+am\s+i\s+doing|(?:my\s+)?(?:stats|progress|score))" + _POLITE, re.I)),
+    ("daily_off", re.compile(
+        r"^\s*(?:stop|cancel|turn\s+off)\s+(?:the\s+)?daily(?:\s+quiz)?" + _POLITE, re.I)),
+]
+_QUIZ = re.compile(r"^\s*(?:quiz\s+me|start\s+(?:a\s+)?quiz|quiz)(?:\s+on\s+([a-z .&-]+?))?" + _POLITE, re.I)
+
 
 @dataclass
 class PageRead:
@@ -168,11 +182,23 @@ async def read_page(
 
 
 def quick_intent(text: str) -> Intent | None:
-    """Catch 'Q14'-style messages without a model call."""
-    match = _QUESTION_NUMBER.match(text or "")
-    if not match:
-        return None
-    return Intent(name="lookup", number=int(match.group(1)), query=text.strip())
+    """Catch 'Q14', 'quiz me on polity', 'how am I doing' and the like without a model call."""
+    text = text or ""
+    match = _QUESTION_NUMBER.match(text)
+    if match:
+        return Intent(name="lookup", number=int(match.group(1)), query=text.strip())
+    for name, pattern in _FIXED_INTENTS:
+        if pattern.match(text):
+            return Intent(name=name, query=text.strip())
+    match = _QUIZ.match(text)
+    if match:
+        subject = None
+        if match.group(1):
+            subject = normalise_subject(match.group(1))
+            if subject == "General":
+                return None  # a topic, not a subject: let the model read it
+        return Intent(name="quiz", subject=subject, query=text.strip())
+    return None
 
 
 def parse_intent(raw: str, text: str) -> Intent:

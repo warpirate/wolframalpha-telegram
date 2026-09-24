@@ -53,9 +53,21 @@ def test_quick_intent_question_numbers():
         assert intent is not None and intent.name == "lookup" and intent.number == number, text
 
 
+def test_quick_intent_common_phrases():
+    for text, name in [("what should I study?", "study_plan"), ("study plan please", "study_plan"),
+                       ("How am I doing?", "stats"), ("stats", "stats"),
+                       ("stop daily quiz", "daily_off"), ("quiz me", "quiz")]:
+        intent = router.quick_intent(text)
+        assert intent is not None and intent.name == name, text
+    polity = router.quick_intent("quiz me on polity")
+    assert polity.name == "quiz" and polity.subject == "Polity"
+
+
 def test_quick_intent_ignores_other_text():
-    assert router.quick_intent("what should I study") is None
     assert router.quick_intent("15% of 640") is None
+    assert router.quick_intent("what should I study for the mauryan chapter") is None
+    assert router.quick_intent("quiz me on ashoka's dhamma") is None  # topic, not subject
+    assert router.quick_intent("daily quiz at 6am") is None  # needs the hour parsed
 
 
 def test_parse_intent():
