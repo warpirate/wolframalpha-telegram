@@ -28,9 +28,11 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
+import access
 import db
 import library
 import quiz
@@ -41,6 +43,7 @@ from ai_client import AIError, NebiusClient
 from config import (
     HISTORY_TURNS,
     LOG_LEVEL,
+    ADMIN_USER_IDS,
     NEBIUS_API_KEY,
     NEBIUS_BASE_URL,
     NEBIUS_MODEL,
@@ -241,6 +244,14 @@ def _start_health_server(port: int) -> None:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_message:
         await _reply_md(update.effective_message, WELCOME)
+
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admins only: everyone who has registered. Anyone else gets no reply."""
+    message, user = update.effective_message, update.effective_user
+    if message is None or user is None or not access.is_admin(user.id):
+        return
+    await message.reply_text(access.render_users(await db.list_users()))
 
 
 # ---------------------------------------------------------------- photo handling
@@ -709,6 +720,8 @@ async def _daily_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     count = data.get("count", DEFAULT_QUIZ_LENGTH)
     if user_id is None or chat_id is None:
         return
+    if access.enabled() and not access.is_admin(user_id) and await db.get_user(user_id) is None:
+        return  # set up before the password existed; they must register first
 
     questions = await db.pick_quiz(user_id, count)
     if not questions:
@@ -772,6 +785,10 @@ async def _post_init(application: Application) -> None:
 
     await db.init()
     logger.info("Storage backend: %s", db.backend_name())
+    if access.enabled():
+        logger.info("Password gate on (%d admin(s))", len(ADMIN_USER_IDS))
+    else:
+        logger.warning("BOT_PASSWORD is not set: anyone who finds this bot can use it")
 
     restored = 0
     for row in await db.all_daily():
@@ -799,7 +816,10 @@ def build_application() -> Application:
         .build()
     )
 
+    # Group -1 runs first and stops the update for anyone not registered.
+    application.add_handler(TypeHandler(Update, access.gate), group=-1)
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("users", list_users))
     application.add_handler(CallbackQueryHandler(on_answer, pattern=r"^q:"))
     application.add_handler(CallbackQueryHandler(on_library_button, pattern=r"^[uwk]:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

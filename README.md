@@ -107,7 +107,7 @@ Any LaTeX the model still emits gets converted before it reaches Telegram:
 |---|---|
 | `\frac{-b \pm \sqrt{\Delta}}{2a}` | `(-b ± √(∆))/(2a)` |
 | `x^{2} + H_{2}O` | `x² + H₂O` |
-| `$$\int_0^\infty$$` | `∫₀^(∞)` |
+| `$$\int_0^\infty$$` | `∫₀^∞` |
 
 ---
 
@@ -150,6 +150,25 @@ open **API keys**, create one.
 ## Commands
 
 Only `/start`. Everything else is photos and plain messages (see above).
+Admins also have `/users`, which lists everyone registered.
+
+## Private access
+
+Set `BOT_PASSWORD` and the bot talks to nobody until they send it. A new user gets
+asked for the password, then their name, and is saved to the `users` table:
+
+```
+Stranger:  hi
+Bot:       🔒 This bot is private. Send the password to continue.
+Stranger:  ••••••••            ← deleted from the chat once read
+Bot:       ✅ Password accepted. What's your name?
+Stranger:  Ravi
+Bot:       Welcome, Ravi! Send /start to see what I can do.
+```
+
+Five wrong passwords lock that user out for 15 minutes. Everyone in `ADMIN_USER_IDS`
+skips the password, gets a message each time someone registers, and can send
+`/users`. With `BOT_PASSWORD` empty the bot is open to anyone and says so in the log.
 
 ---
 
@@ -243,6 +262,8 @@ down until under 3 MB, all in a worker thread so the event loop never blocks. A
 | `NEBIUS_VISION_MODEL` |          | same as above                       | Photo model                        |
 | `NEBIUS_EMBED_MODEL`  |          | `Qwen/Qwen3-Embedding-8B`         | Embeddings for search (1024 dims)  |
 | `DATABASE_URL`        |          | unset → SQLite                     | Postgres DSN; needs pgvector       |
+| `BOT_PASSWORD`        |          | unset → open to anyone             | Password new users must send       |
+| `ADMIN_USER_IDS`      |          | —                                  | Comma-separated ids: skip password, see `/users` |
 | `LOG_LEVEL`           |          | `INFO`                            | `DEBUG` for verbose              |
 | `HISTORY_TURNS`       |          | `4`                               | Solver memory depth,`0` disables |
 
@@ -312,6 +333,7 @@ the four.
 | File                   | Role                                                                 |
 | ---------------------- | -------------------------------------------------------------------- |
 | `main.py`            | Handlers, photo/text routing, buttons, JobQueue, lifecycle           |
+| `access.py`          | Password and name sign-up, admin `/users`                            |
 | `router.py`          | Photo → page kind + extracted content; text → intent                 |
 | `library.py`         | Saves each photo by kind, focus, PYQ lookup, grounded prompts        |
 | `retrieval.py`       | Chunking, embeddings, similarity search                              |
@@ -343,8 +365,11 @@ Your question bank lives in `exam.db` (gitignored — it is personal data).
   you've photographed; until about 30 are in, weightage is an estimate.
 - **Open-ended questions take ~20 s** because reasoning runs before any output. Straight
   computation is ~6 s.
-- **Single-user by design.** Data is keyed by Telegram user id and it works fine for a
-  few people, but there is no auth, quota, or admin layer.
+- **Typed questions with nothing saved on them come from the model's memory.** Those
+  answers end with "⚠️ Not from your saved pages — check it in your book." so you know
+  which ones to verify.
+- **Built for a small group.** Data is keyed by Telegram user id and a shared password
+  keeps strangers out, but there are no per-user quotas.
 
 ---
 

@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS prefs (
     daily_hour  INTEGER,
     daily_count INTEGER NOT NULL DEFAULT 10
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id       BIGINT PRIMARY KEY,
+    name          TEXT        NOT NULL,
+    username      TEXT        NOT NULL DEFAULT '',
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 EMBED_DIMENSIONS = 1024
@@ -418,6 +425,34 @@ async def all_daily() -> list[dict]:
     pool = _require_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM prefs WHERE daily_hour IS NOT NULL")
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------- users
+
+
+async def add_user(user_id: int, name: str, username: str = "") -> None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO users (user_id, name, username) VALUES ($1,$2,$3)
+               ON CONFLICT (user_id) DO UPDATE SET
+                 name = EXCLUDED.name, username = EXCLUDED.username""",
+            user_id, name, username,
+        )
+
+
+async def get_user(user_id: int) -> dict | None:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+    return dict(row) if row else None
+
+
+async def list_users() -> list[dict]:
+    pool = _require_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM users ORDER BY registered_at")
     return [dict(row) for row in rows]
 
 

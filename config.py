@@ -60,6 +60,15 @@ DATABASE_URL: str = _optional("DATABASE_URL", "")
 # the bot also serves a tiny health endpoint so the platform sees it as alive.
 PORT: int = int(_optional("PORT", "0") or 0)
 
+# Access control. With BOT_PASSWORD set, a new user must send it once and then
+# give a name before the bot does anything for them. Unset means anyone can use it.
+BOT_PASSWORD: str = _optional("BOT_PASSWORD", "")
+# Telegram user ids (comma separated) that skip the password, get told about each
+# new user, and can send /users to see everyone registered.
+ADMIN_USER_IDS: frozenset[int] = frozenset(
+    int(part) for part in _optional("ADMIN_USER_IDS", "").replace(" ", "").split(",") if part.isdigit()
+)
+
 # Optional tuning knobs (safe defaults, no validation errors if unset).
 LOG_LEVEL: str = _optional("LOG_LEVEL", "INFO").upper()
 HISTORY_TURNS: int = max(0, int(_optional("HISTORY_TURNS", "4")))
@@ -73,6 +82,8 @@ __all__ = [
     "NEBIUS_EMBED_MODEL",
     "DATABASE_URL",
     "PORT",
+    "BOT_PASSWORD",
+    "ADMIN_USER_IDS",
     "LOG_LEVEL",
     "HISTORY_TURNS",
 ]

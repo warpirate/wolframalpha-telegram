@@ -24,3 +24,7 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: BOT_PASSWORD
+        sync: false
+      - key: ADMIN_USER_IDS
+        sync: false

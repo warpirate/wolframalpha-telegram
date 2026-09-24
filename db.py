@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     batch_id    TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_user ON chunks(user_id, source);
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id       INTEGER PRIMARY KEY,
+    name          TEXT    NOT NULL,
+    username      TEXT    NOT NULL DEFAULT '',
+    registered_at TEXT    NOT NULL
+);
 """
 
 
@@ -408,6 +415,38 @@ def _all_daily(conn) -> list[sqlite3.Row]:
 
 async def all_daily() -> list[dict]:
     return [dict(row) for row in await call(_all_daily)]
+
+
+# ---------------------------------------------------------------------- users
+
+
+def _add_user(conn, user_id: int, name: str, username: str) -> None:
+    conn.execute(
+        """INSERT INTO users (user_id, name, username, registered_at) VALUES (?,?,?,?)
+           ON CONFLICT(user_id) DO UPDATE SET name = excluded.name, username = excluded.username""",
+        (user_id, name, username, now_iso()),
+    )
+
+
+async def add_user(user_id: int, name: str, username: str = "") -> None:
+    await call(_add_user, user_id, name, username)
+
+
+def _get_user(conn, user_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+
+
+async def get_user(user_id: int) -> dict | None:
+    row = await call(_get_user, user_id)
+    return dict(row) if row else None
+
+
+def _list_users(conn) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM users ORDER BY registered_at").fetchall()
+
+
+async def list_users() -> list[dict]:
+    return [dict(row) for row in await call(_list_users)]
 
 
 # -------------------------------------------------------------------- library
@@ -735,6 +774,9 @@ if USING_POSTGRES:
     weak_topics = db_pg.weak_topics              # type: ignore[assignment]
     set_daily = db_pg.set_daily                  # type: ignore[assignment]
     all_daily = db_pg.all_daily                  # type: ignore[assignment]
+    add_user = db_pg.add_user                    # type: ignore[assignment]
+    get_user = db_pg.get_user                    # type: ignore[assignment]
+    list_users = db_pg.list_users                # type: ignore[assignment]
     upsert_book = db_pg.upsert_book              # type: ignore[assignment]
     upsert_chapter = db_pg.upsert_chapter        # type: ignore[assignment]
     list_chapters = db_pg.list_chapters                # type: ignore[assignment]
